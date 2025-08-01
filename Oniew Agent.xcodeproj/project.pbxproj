@@ -1,0 +1,556 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXContainerItemProxy section */
+		CFBA6DE12E3CCC0F0021F5B1 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = CFBA6DCA2E3CCC0E0021F5B1 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = CFBA6DD12E3CCC0E0021F5B1;
+			remoteInfo = "Oniew Agent";
+		};
+		CFBA6DEB2E3CCC0F0021F5B1 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = CFBA6DCA2E3CCC0E0021F5B1 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = CFBA6DD12E3CCC0E0021F5B1;
+			remoteInfo = "Oniew Agent";
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		CFBA6DD22E3CCC0E0021F5B1 /* Oniew Agent.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Oniew Agent.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		CFBA6DE02E3CCC0F0021F5B1 /* Oniew AgentTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Oniew AgentTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+		CFBA6DEA2E3CCC0F0021F5B1 /* Oniew AgentUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Oniew AgentUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		CFBA6DD42E3CCC0E0021F5B1 /* Oniew Agent */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "Oniew Agent";
+			sourceTree = "<group>";
+		};
+		CFBA6DE32E3CCC0F0021F5B1 /* Oniew AgentTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "Oniew AgentTests";
+			sourceTree = "<group>";
+		};
+		CFBA6DED2E3CCC0F0021F5B1 /* Oniew AgentUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "Oniew AgentUITests";
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		CFBA6DCF2E3CCC0E0021F5B1 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CFBA6DDD2E3CCC0F0021F5B1 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CFBA6DE72E3CCC0F0021F5B1 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		CFBA6DC92E3CCC0E0021F5B1 = {
+			isa = PBXGroup;
+			children = (
+				CFBA6DD42E3CCC0E0021F5B1 /* Oniew Agent */,
+				CFBA6DE32E3CCC0F0021F5B1 /* Oniew AgentTests */,
+				CFBA6DED2E3CCC0F0021F5B1 /* Oniew AgentUITests */,
+				CFBA6DD32E3CCC0E0021F5B1 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		CFBA6DD32E3CCC0E0021F5B1 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				CFBA6DD22E3CCC0E0021F5B1 /* Oniew Agent.app */,
+				CFBA6DE02E3CCC0F0021F5B1 /* Oniew AgentTests.xctest */,
+				CFBA6DEA2E3CCC0F0021F5B1 /* Oniew AgentUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		CFBA6DD12E3CCC0E0021F5B1 /* Oniew Agent */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = CFBA6DF42E3CCC0F0021F5B1 /* Build configuration list for PBXNativeTarget "Oniew Agent" */;
+			buildPhases = (
+				CFBA6DCE2E3CCC0E0021F5B1 /* Sources */,
+				CFBA6DCF2E3CCC0E0021F5B1 /* Frameworks */,
+				CFBA6DD02E3CCC0E0021F5B1 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				CFBA6DD42E3CCC0E0021F5B1 /* Oniew Agent */,
+			);
+			name = "Oniew Agent";
+			packageProductDependencies = (
+			);
+			productName = "Oniew Agent";
+			productReference = CFBA6DD22E3CCC0E0021F5B1 /* Oniew Agent.app */;
+			productType = "com.apple.product-type.application";
+		};
+		CFBA6DDF2E3CCC0F0021F5B1 /* Oniew AgentTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = CFBA6DF72E3CCC0F0021F5B1 /* Build configuration list for PBXNativeTarget "Oniew AgentTests" */;
+			buildPhases = (
+				CFBA6DDC2E3CCC0F0021F5B1 /* Sources */,
+				CFBA6DDD2E3CCC0F0021F5B1 /* Frameworks */,
+				CFBA6DDE2E3CCC0F0021F5B1 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				CFBA6DE22E3CCC0F0021F5B1 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				CFBA6DE32E3CCC0F0021F5B1 /* Oniew AgentTests */,
+			);
+			name = "Oniew AgentTests";
+			packageProductDependencies = (
+			);
+			productName = "Oniew AgentTests";
+			productReference = CFBA6DE02E3CCC0F0021F5B1 /* Oniew AgentTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		CFBA6DE92E3CCC0F0021F5B1 /* Oniew AgentUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = CFBA6DFA2E3CCC0F0021F5B1 /* Build configuration list for PBXNativeTarget "Oniew AgentUITests" */;
+			buildPhases = (
+				CFBA6DE62E3CCC0F0021F5B1 /* Sources */,
+				CFBA6DE72E3CCC0F0021F5B1 /* Frameworks */,
+				CFBA6DE82E3CCC0F0021F5B1 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				CFBA6DEC2E3CCC0F0021F5B1 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				CFBA6DED2E3CCC0F0021F5B1 /* Oniew AgentUITests */,
+			);
+			name = "Oniew AgentUITests";
+			packageProductDependencies = (
+			);
+			productName = "Oniew AgentUITests";
+			productReference = CFBA6DEA2E3CCC0F0021F5B1 /* Oniew AgentUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		CFBA6DCA2E3CCC0E0021F5B1 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1640;
+				LastUpgradeCheck = 1640;
+				TargetAttributes = {
+					CFBA6DD12E3CCC0E0021F5B1 = {
+						CreatedOnToolsVersion = 16.4;
+					};
+					CFBA6DDF2E3CCC0F0021F5B1 = {
+						CreatedOnToolsVersion = 16.4;
+						TestTargetID = CFBA6DD12E3CCC0E0021F5B1;
+					};
+					CFBA6DE92E3CCC0F0021F5B1 = {
+						CreatedOnToolsVersion = 16.4;
+						TestTargetID = CFBA6DD12E3CCC0E0021F5B1;
+					};
+				};
+			};
+			buildConfigurationList = CFBA6DCD2E3CCC0E0021F5B1 /* Build configuration list for PBXProject "Oniew Agent" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = CFBA6DC92E3CCC0E0021F5B1;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = CFBA6DD32E3CCC0E0021F5B1 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				CFBA6DD12E3CCC0E0021F5B1 /* Oniew Agent */,
+				CFBA6DDF2E3CCC0F0021F5B1 /* Oniew AgentTests */,
+				CFBA6DE92E3CCC0F0021F5B1 /* Oniew AgentUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		CFBA6DD02E3CCC0E0021F5B1 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CFBA6DDE2E3CCC0F0021F5B1 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CFBA6DE82E3CCC0F0021F5B1 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		CFBA6DCE2E3CCC0E0021F5B1 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CFBA6DDC2E3CCC0F0021F5B1 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CFBA6DE62E3CCC0F0021F5B1 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		CFBA6DE22E3CCC0F0021F5B1 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = CFBA6DD12E3CCC0E0021F5B1 /* Oniew Agent */;
+			targetProxy = CFBA6DE12E3CCC0F0021F5B1 /* PBXContainerItemProxy */;
+		};
+		CFBA6DEC2E3CCC0F0021F5B1 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = CFBA6DD12E3CCC0E0021F5B1 /* Oniew Agent */;
+			targetProxy = CFBA6DEB2E3CCC0F0021F5B1 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		CFBA6DF22E3CCC0F0021F5B1 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = TRAST236C4;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.5;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		CFBA6DF32E3CCC0F0021F5B1 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = TRAST236C4;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.5;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+			};
+			name = Release;
+		};
+		CFBA6DF52E3CCC0F0021F5B1 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "Oniew Agent/Oniew_Agent.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = TRAST236C4;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.codehubsoftwares.oniewAgent.Oniew-Agent";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		CFBA6DF62E3CCC0F0021F5B1 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "Oniew Agent/Oniew_Agent.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = TRAST236C4;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.codehubsoftwares.oniewAgent.Oniew-Agent";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		CFBA6DF82E3CCC0F0021F5B1 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = TRAST236C4;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.5;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.codehubsoftwares.oniewAgent.Oniew-AgentTests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Oniew Agent.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Oniew Agent";
+			};
+			name = Debug;
+		};
+		CFBA6DF92E3CCC0F0021F5B1 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = TRAST236C4;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.5;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.codehubsoftwares.oniewAgent.Oniew-AgentTests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Oniew Agent.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Oniew Agent";
+			};
+			name = Release;
+		};
+		CFBA6DFB2E3CCC0F0021F5B1 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = TRAST236C4;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.codehubsoftwares.oniewAgent.Oniew-AgentUITests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_TARGET_NAME = "Oniew Agent";
+			};
+			name = Debug;
+		};
+		CFBA6DFC2E3CCC0F0021F5B1 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = TRAST236C4;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.codehubsoftwares.oniewAgent.Oniew-AgentUITests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_TARGET_NAME = "Oniew Agent";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		CFBA6DCD2E3CCC0E0021F5B1 /* Build configuration list for PBXProject "Oniew Agent" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				CFBA6DF22E3CCC0F0021F5B1 /* Debug */,
+				CFBA6DF32E3CCC0F0021F5B1 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		CFBA6DF42E3CCC0F0021F5B1 /* Build configuration list for PBXNativeTarget "Oniew Agent" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				CFBA6DF52E3CCC0F0021F5B1 /* Debug */,
+				CFBA6DF62E3CCC0F0021F5B1 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		CFBA6DF72E3CCC0F0021F5B1 /* Build configuration list for PBXNativeTarget "Oniew AgentTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				CFBA6DF82E3CCC0F0021F5B1 /* Debug */,
+				CFBA6DF92E3CCC0F0021F5B1 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		CFBA6DFA2E3CCC0F0021F5B1 /* Build configuration list for PBXNativeTarget "Oniew AgentUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				CFBA6DFB2E3CCC0F0021F5B1 /* Debug */,
+				CFBA6DFC2E3CCC0F0021F5B1 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = CFBA6DCA2E3CCC0E0021F5B1 /* Project object */;
+}
