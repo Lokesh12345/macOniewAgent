@@ -1,4 +1,5 @@
 {
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "permissions": {
     "allow": [
       "Bash(git remote add:*)",
@@ -8,7 +9,23 @@
       "Bash(mkdir:*)",
       "Bash(mv:*)",
       "Bash(pkill:*)",
-      "Bash(kill:*)"
+      "Bash(kill:*)",
+      "Bash(pnpm build:*)",
+      "Bash(chmod:*)",
+      "Bash(./install-native-messaging.sh:*)",
+      "Bash(ls:*)",
+      "Bash(find:*)",
+      "Bash(cp:*)",
+      "Bash(defaults read:*)",
+      "Bash(cd:*)",
+      "Bash(cd:*)",
+      "Bash(rm:*)",
+      "Bash(node:*)",
+      "Bash(npm install:*)",
+      "Bash(pnpm dev:*)",
+      "Bash(xcodebuild:*)",
+      "mcp__ide__getDiagnostics",
+      "Bash(grep:*)"
     ],
     "deny": []
   }
