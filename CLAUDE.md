@@ -1,68 +1,111 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
 # Oniew Agent - macOS Control Agent
 
 ## Project Overview
-Oniew Agent is a macOS application that provides AI-powered control and automation of macOS systems. This agent allows users to interact with their Mac through natural language commands and automate various system tasks.
+Oniew Agent is a dual-component AI-powered automation system consisting of:
+1. **macOS Application** (Swift/SwiftUI) - Floating control interface
+2. **Chrome Extension** (TypeScript/React) - Browser automation based on nanobrowser
 
-## Architecture
-- **Platform**: macOS (SwiftUI)
-- **Language**: Swift
-- **Framework**: SwiftUI for UI, Foundation for system interactions
-- **Target**: macOS 12.0+
+## Development Commands
 
-## Core Features
-- System automation and control
-- Natural language command processing
-- File system operations
-- Application management
-- System preferences modification
-- Accessibility-based UI automation
+### macOS Application
+```bash
+# Build
+xcodebuild -project "Oniew Agent.xcodeproj" -scheme "Oniew Agent" build
 
-## Development Environment
-- Xcode 14.0+
-- Swift 5.7+
-- macOS 12.0+ deployment target
+# Test
+xcodebuild -project "Oniew Agent.xcodeproj" -scheme "Oniew Agent" test
 
-## Key Components
-- `Oniew_AgentApp.swift` - Main application entry point
-- `ContentView.swift` - Primary user interface
-- Additional views and controllers for specific functionality
+# Clean
+xcodebuild -project "Oniew Agent.xcodeproj" clean
+```
 
-## System Permissions Required
-- Accessibility API access for UI automation
-- Full Disk Access for file operations
-- Automation permissions for controlling other applications
+### Chrome Extension (nanobrowser-master/)
+```bash
+# Development with hot reload
+pnpm dev
 
-## Security Considerations
-- All system access is controlled through macOS permission prompts
-- No remote code execution capabilities
-- Local-only operation for security
+# Production build
+pnpm build
+
+# Create distribution package
+pnpm zip
+
+# Type checking
+pnpm type-check
+
+# Linting
+pnpm lint
+```
+
+## Architecture Overview
+
+### Core Components
+- **AgentPanel.swift** (1,622 lines) - Main UI with tabbed interface, task execution display, and chat input
+- **WebSocketServer.swift** - Custom WebSocket implementation (port 41899)
+- **ExtensionConnectionManager.swift** - Handles communication between macOS app and Chrome extension
+- **SettingsManager.swift** - Manages 12 LLM providers with agent-specific model assignments
+
+### Communication Protocol
+- Custom WebSocket server on port 41899 (localhost-only)
+- JSON message format between macOS app and Chrome extension
+- Auto-reconnection and ping/pong heartbeat
+- Real-time task execution updates
+
+### UI Architecture
+- Floating, borderless window (300x600px) positioned at right-center screen
+- Always-on-top with transparent background
+- Drag-to-move functionality
+- SwiftUI MVVM pattern with reactive data binding
+
+### LLM Integration
+- Supports 12 providers: OpenAI, Anthropic, Ollama, Groq, DeepSeek, etc.
+- Agent-specific model assignments (planner, navigator, validator)
+- Automatic Ollama model discovery
+- Settings synchronized between app and extension
+
+## Security Configuration
+The app requires extensive macOS permissions (defined in entitlements):
+- Audio input access for voice commands
+- Screen capture for monitoring
+- File system access for downloads
+- Apple Events automation for system control
+- Subprocess execution for external tools
+
+## Key Development Patterns
+
+### State Management
+- `@StateObject` and `@Published` for reactive SwiftUI components
+- Singleton pattern for core services (`ExtensionConnectionManager.shared`, `SettingsManager.shared`)
+- `NotificationCenter` for cross-component communication
+
+### WebSocket Implementation
+- Pure Swift implementation without external dependencies
+- Custom frame parsing and handshake handling
+- Supports WebSocket protocol RFC 6455
+
+### Extension Development
+- Based on nanobrowser architecture
+- Chrome Manifest V3
+- Shared TypeScript packages for common functionality
 
 ## Testing
-- Unit tests in `Oniew AgentTests/`
+- Minimal unit tests in `Oniew AgentTests/`
 - UI tests in `Oniew AgentUITests/`
+- Integration testing via WebSocket connection between components
+- Use `wscat` for WebSocket debugging: `wscat -c ws://localhost:41899`
 
-## Commands for Development
-- Build: `xcodebuild -project "Oniew Agent.xcodeproj" -scheme "Oniew Agent" build`
-- Test: `xcodebuild -project "Oniew Agent.xcodeproj" -scheme "Oniew Agent" test`
-- Clean: `xcodebuild -project "Oniew Agent.xcodeproj" clean`
+## Development Environment
+- macOS 12.0+ deployment target
+- Xcode 14.0+ with Swift 5.7+
+- Node.js 22.12.0+ for extension development
+- Chrome browser for extension testing
 
-## Project Structure
-```
-Oniew Agent/
-├── Oniew Agent.xcodeproj/     # Xcode project files
-├── Oniew Agent/               # Main app source
-│   ├── Assets.xcassets/       # App assets and icons
-│   ├── ContentView.swift      # Main UI view
-│   ├── Oniew_AgentApp.swift   # App entry point
-│   └── Oniew_Agent.entitlements # App capabilities
-├── Oniew AgentTests/          # Unit tests
-├── Oniew AgentUITests/        # UI tests
-└── .gitignore                 # Git ignore rules
-```
-
-## Development Notes
-- Focus on defensive security practices
-- Implement proper error handling for system operations
-- Use SwiftUI for modern, declarative UI
-- Follow macOS Human Interface Guidelines
-- Ensure compatibility with macOS accessibility features
+## Project Structure Notes
+- `nanobrowser-master/` contains the Chrome extension codebase
+- `Oniew Agent/Models/`, `Services/`, `Views/Components/` organize Swift code by layer
+- Settings are synchronized between macOS app and extension via WebSocket
+- Both codebases maintain independent build systems but share communication protocol
