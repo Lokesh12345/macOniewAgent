@@ -104,3 +104,15 @@ Icon
 Network Trash Folder
 Temporary Items
 .apdisk
+
+# Nanobrowser specific
+nanobrowser-master/node_modules/
+nanobrowser-master/dist/
+nanobrowser-master/build/
+nanobrowser-master/.turbo/
+nanobrowser-master/packages/*/node_modules/
+nanobrowser-master/pages/*/node_modules/
+nanobrowser-master/chrome-extension/node_modules/
+nanobrowser-master/*.log
+nanobrowser-master/.env.local
+nanobrowser-master/.env.production

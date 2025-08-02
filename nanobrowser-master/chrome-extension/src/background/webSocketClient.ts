@@ -8,9 +8,10 @@ export class WebSocketClient {
   private reconnectTimer: NodeJS.Timeout | null = null;
   private isConnected = false;
   private messageHandlers: Map<string, (data: any) => void> = new Map();
-  private maxReconnectAttempts = 10;
+  private maxReconnectAttempts = Infinity; // Keep trying forever
   private reconnectAttempts = 0;
   private reconnectDelay = 2000; // Start with 2 seconds
+  private pingInterval: NodeJS.Timeout | null = null;
 
   constructor() {
     // Don't auto-connect in constructor, let background script control this
@@ -40,6 +41,15 @@ export class WebSocketClient {
           type: 'ping',
           data: { source: 'extension' }
         });
+        
+        // Request all settings from Mac app on connection after a short delay
+        setTimeout(() => {
+          logger.info('Requesting settings from Mac app after connection established');
+          this.requestAllSettingsFromMac();
+        }, 500);
+        
+        // Start periodic ping
+        this.startPingInterval();
       };
 
       this.ws.onmessage = (event) => {
@@ -56,16 +66,24 @@ export class WebSocketClient {
         logger.info('WebSocket connection closed:', event.code, event.reason);
         this.isConnected = false;
         this.ws = null;
+        this.stopPingInterval();
         
         // Attempt to reconnect if not manually closed
-        if (event.code !== 1000 && this.reconnectAttempts < this.maxReconnectAttempts) {
+        if (event.code !== 1000) {
           this.scheduleReconnect();
+        } else {
+          logger.info('WebSocket closed normally');
         }
       };
 
       this.ws.onerror = (error) => {
         logger.error('WebSocket error:', error);
+        logger.error('Connection failed to:', this.serverUrl);
         this.isConnected = false;
+        // Check if Mac app is running
+        if (this.reconnectAttempts === 0) {
+          logger.error('Make sure the Oniew Agent Mac app is running');
+        }
       };
 
     } catch (error) {
@@ -80,7 +98,9 @@ export class WebSocketClient {
     }
 
     this.reconnectAttempts++;
-    const delay = Math.min(this.reconnectDelay * Math.pow(1.5, this.reconnectAttempts - 1), 30000);
+    // Cap reconnect attempts counter for delay calculation
+    const attemptForDelay = Math.min(this.reconnectAttempts, 10);
+    const delay = Math.min(this.reconnectDelay * Math.pow(1.5, attemptForDelay - 1), 30000);
     
     logger.info(`Scheduling reconnect attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts} in ${delay}ms`);
     
@@ -98,6 +118,16 @@ export class WebSocketClient {
     switch (message.type) {
       case 'pong':
         // Handle pong response
+        logger.info('Received pong from Mac app');
+        break;
+      
+      case 'ping':
+        // Respond with pong
+        this.sendMessage({
+          type: 'pong',
+          data: { source: 'extension' }
+        });
+        logger.info('Received ping, sent pong');
         break;
       
       case 'execute_task':
@@ -108,6 +138,21 @@ export class WebSocketClient {
       case 'abort_task':
         // Forward task abort to the existing system
         this.forwardTaskAbort(message.data);
+        break;
+      
+      case 'settings_update':
+        // Apply settings from Mac app to Chrome extension
+        this.applySettingsFromMac(message.data);
+        break;
+      
+      case 'general_settings_update':
+        // Apply general settings from Mac app to Chrome extension
+        this.applyGeneralSettingsFromMac(message.data);
+        break;
+      
+      case 'firewall_settings_update':
+        // Apply firewall settings from Mac app to Chrome extension
+        this.applyFirewallSettingsFromMac(message.data);
         break;
 
       default:
@@ -267,6 +312,8 @@ export class WebSocketClient {
       this.reconnectTimer = null;
     }
 
+    this.stopPingInterval();
+
     if (this.ws) {
       this.ws.close(1000, 'Manual disconnect');
       this.ws = null;
@@ -274,6 +321,194 @@ export class WebSocketClient {
 
     this.isConnected = false;
     this.reconnectAttempts = this.maxReconnectAttempts; // Prevent auto-reconnect
+  }
+
+  private startPingInterval() {
+    this.stopPingInterval();
+    // Send ping every 25 seconds (less than server's 30 second timeout)
+    this.pingInterval = setInterval(() => {
+      if (this.isConnected) {
+        this.sendMessage({
+          type: 'ping',
+          data: { source: 'extension', timestamp: Date.now() }
+        });
+        logger.info('Sent ping to keep connection alive');
+      }
+    }, 25000);
+  }
+
+  private stopPingInterval() {
+    if (this.pingInterval) {
+      clearInterval(this.pingInterval);
+      this.pingInterval = null;
+    }
+  }
+
+  private async applySettingsFromMac(data: any) {
+    try {
+      logger.info('Applying settings from Mac app:', data);
+      logger.info('Raw data received:', JSON.stringify(data, null, 2));
+      
+      // Import storage modules dynamically to avoid circular dependencies
+      const { llmProviderStore, agentModelStore } = await import('@extension/storage');
+      
+      // Apply provider settings
+      if (data.providers) {
+        logger.info('Applying providers:', Object.keys(data.providers));
+        for (const [providerId, providerData] of Object.entries(data.providers)) {
+          if (typeof providerData === 'object' && providerData !== null) {
+            const provider = providerData as any;
+            logger.info(`Setting provider ${providerId}:`, provider);
+            await llmProviderStore.setProvider(providerId, {
+              apiKey: provider.apiKey || '',
+              name: provider.name,
+              type: provider.type,
+              baseUrl: provider.baseUrl,
+              modelNames: provider.modelNames,
+              createdAt: provider.createdAt || Date.now()
+            });
+          }
+        }
+      }
+      
+      // Apply agent model settings
+      if (data.agentModels) {
+        const { AgentNameEnum } = await import('@extension/storage');
+        logger.info('Applying agent models:', Object.keys(data.agentModels));
+        
+        for (const [agentName, modelData] of Object.entries(data.agentModels)) {
+          logger.info(`Processing agent ${agentName}:`, modelData);
+          if (typeof modelData === 'object' && modelData !== null) {
+            const model = modelData as any;
+            
+            // Map agent name string to AgentNameEnum
+            let agentEnum: string | undefined;
+            // The agentName from Mac app is already lowercase, and AgentNameEnum values are also lowercase
+            switch (agentName) {
+              case 'planner':
+                agentEnum = AgentNameEnum.Planner;
+                break;
+              case 'navigator':
+                agentEnum = AgentNameEnum.Navigator;
+                break;
+              case 'validator':
+                agentEnum = AgentNameEnum.Validator;
+                break;
+              default:
+                logger.warning(`Unknown agent name: ${agentName}`);
+                continue;
+            }
+            
+            if (agentEnum && model.provider && model.modelName) {
+              logger.info(`Setting agent model for ${agentName}:`, {
+                provider: model.provider,
+                modelName: model.modelName,
+                parameters: model.parameters,
+                reasoningEffort: model.reasoningEffort
+              });
+              
+              await agentModelStore.setAgentModel(agentEnum, {
+                provider: model.provider,
+                modelName: model.modelName,
+                parameters: model.parameters,
+                reasoningEffort: model.reasoningEffort
+              });
+            }
+          }
+        }
+      }
+      
+      logger.info('Settings successfully applied from Mac app');
+      
+    } catch (error) {
+      logger.error('Failed to apply settings from Mac app:', error);
+    }
+  }
+
+  private async applyGeneralSettingsFromMac(data: any) {
+    try {
+      logger.info('Applying general settings from Mac app:', data);
+      
+      // Import storage modules dynamically to avoid circular dependencies
+      const { generalSettingsStore } = await import('@extension/storage');
+      
+      // Apply general settings
+      if (data) {
+        const settingsToApply: any = {};
+        
+        // Map settings from Mac app to extension format
+        if (typeof data.maxSteps === 'number') settingsToApply.maxSteps = data.maxSteps;
+        if (typeof data.maxActionsPerStep === 'number') settingsToApply.maxActionsPerStep = data.maxActionsPerStep;
+        if (typeof data.maxFailures === 'number') settingsToApply.maxFailures = data.maxFailures;
+        if (typeof data.useVision === 'boolean') settingsToApply.useVision = data.useVision;
+        if (typeof data.displayHighlights === 'boolean') settingsToApply.displayHighlights = data.displayHighlights;
+        if (typeof data.planningInterval === 'number') settingsToApply.planningInterval = data.planningInterval;
+        if (typeof data.minWaitPageLoad === 'number') settingsToApply.minWaitPageLoad = data.minWaitPageLoad;
+        if (typeof data.replayHistoricalTasks === 'boolean') settingsToApply.replayHistoricalTasks = data.replayHistoricalTasks;
+        
+        // Update the extension's general settings store
+        await generalSettingsStore.updateSettings(settingsToApply);
+        
+        logger.info('General settings successfully applied from Mac app:', settingsToApply);
+      }
+      
+    } catch (error) {
+      logger.error('Failed to apply general settings from Mac app:', error);
+    }
+  }
+
+  private async applyFirewallSettingsFromMac(data: any) {
+    try {
+      logger.info('Applying firewall settings from Mac app:', data);
+      
+      // Import storage modules dynamically to avoid circular dependencies
+      const { firewallStore } = await import('@extension/storage');
+      
+      // Apply firewall settings
+      if (data) {
+        const firewallSettings: any = {};
+        
+        // Map settings from Mac app to extension format
+        if (typeof data.enabled === 'boolean') firewallSettings.enabled = data.enabled;
+        if (Array.isArray(data.allowList)) firewallSettings.allowList = data.allowList;
+        if (Array.isArray(data.denyList)) firewallSettings.denyList = data.denyList;
+        
+        // Update the extension's firewall settings store
+        await firewallStore.updateFirewall(firewallSettings);
+        
+        logger.info('Firewall settings successfully applied from Mac app:', firewallSettings);
+      }
+      
+    } catch (error) {
+      logger.error('Failed to apply firewall settings from Mac app:', error);
+    }
+  }
+
+  public requestAllSettingsFromMac() {
+    logger.info('Requesting all settings from Mac app...');
+    
+    // Request LLM/agent settings, general settings, and firewall settings
+    this.sendMessage({
+      type: 'settings_request',
+      data: { source: 'extension' }
+    });
+    
+    this.sendMessage({
+      type: 'general_settings_request',
+      data: { source: 'extension' }
+    });
+    
+    this.sendMessage({
+      type: 'firewall_settings_request',
+      data: { source: 'extension' }
+    });
+  }
+
+  public requestSettingsFromMac() {
+    this.sendMessage({
+      type: 'settings_request',
+      data: { source: 'extension' }
+    });
   }
 }
 

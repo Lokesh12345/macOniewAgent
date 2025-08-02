@@ -90,6 +90,14 @@ function initializeWebSocketConnection() {
     logger.info('Initializing WebSocket connection to Mac app...');
     // Force a fresh connection attempt
     webSocketClient.forceReconnect();
+    
+    // Request ALL settings from Mac app after connection is established
+    setTimeout(() => {
+      if (webSocketClient.getConnectionStatus()) {
+        logger.info('Requesting all settings from Mac app...');
+        webSocketClient.requestAllSettingsFromMac();
+      }
+    }, 2000);
   } catch (error) {
     logger.error('Failed to initialize WebSocket connection:', error);
   }

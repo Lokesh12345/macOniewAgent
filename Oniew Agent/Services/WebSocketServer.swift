@@ -14,6 +14,14 @@ class WebSocketServer {
     var onMessage: (([String: Any]) -> Void)?
     var onError: ((String) -> Void)?
     
+    var isRunning: Bool {
+        return isServerRunning
+    }
+    
+    var hasActiveConnection: Bool {
+        return connection != nil && isWebSocketHandshakeComplete
+    }
+    
     init(port: UInt16) {
         self.port = port
     }
@@ -24,9 +32,14 @@ class WebSocketServer {
             return
         }
         
+        // Stop any existing listener first
+        listener?.cancel()
+        listener = nil
+        
         do {
             let parameters = NWParameters.tcp
             parameters.allowLocalEndpointReuse = true
+            parameters.allowFastOpen = true
             
             listener = try NWListener(using: parameters, on: NWEndpoint.Port(rawValue: port)!)
             
@@ -43,7 +56,18 @@ class WebSocketServer {
                     self?.isServerRunning = false
                     print("❌ Server failed: \(error)")
                     self?.onError?("Server failed to start: \(error)")
-                    // Try to restart after a delay
+                    
+                    // Only retry if it's not an "address in use" error
+                    let errorDescription = "\(error)"
+                    if case .posix(let posixErrorCode) = error, posixErrorCode == .EADDRINUSE {
+                        print("⚠️ Port \(self?.port ?? 0) is already in use - not retrying")
+                        return
+                    } else if errorDescription.contains("Address already in use") || errorDescription.contains("rawValue: 48") {
+                        print("⚠️ Port \(self?.port ?? 0) is already in use - not retrying")
+                        return
+                    }
+                    
+                    // Try to restart after a delay for other errors
                     DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
                         self?.start()
                     }
@@ -62,7 +86,14 @@ class WebSocketServer {
             print("❌ Failed to start server: \(error)")
             onError?("Failed to start server: \(error)")
             
-            // Retry after delay
+            // Don't retry if it's an address in use error
+            let errorDescription = "\(error)"
+            if errorDescription.contains("Address already in use") || errorDescription.contains("rawValue: 48") {
+                print("⚠️ Port \(port) is already in use - not retrying")
+                return
+            }
+            
+            // Retry after delay for other errors
             DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
                 self.start()
             }
@@ -207,7 +238,7 @@ class WebSocketServer {
         let firstByte = data[0]
         let secondByte = data[1]
         
-        let fin = (firstByte & 0x80) != 0
+        let _ = (firstByte & 0x80) != 0 // FIN bit - intentionally unused
         let opcode = firstByte & 0x0F
         let masked = (secondByte & 0x80) != 0
         var payloadLength = Int(secondByte & 0x7F)
@@ -265,12 +296,108 @@ class WebSocketServer {
             if let data = message.data(using: .utf8),
                let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
                 print("✅ Parsed JSON message: \(json)")
-                onMessage?(json)
+                
+                // Handle settings synchronization messages
+                if let messageType = json["type"] as? String {
+                    switch messageType {
+                    case "settings_request":
+                        sendSettingsToExtension()
+                    case "general_settings_request":
+                        sendGeneralSettingsToExtension()
+                    case "firewall_settings_request":
+                        sendFirewallSettingsToExtension()
+                    default:
+                        onMessage?(json)
+                    }
+                } else {
+                    onMessage?(json)
+                }
             }
         } catch {
             print("❌ Failed to parse message: \(error)")
             onError?("Failed to parse message: \(error)")
         }
+    }
+    
+    private func sendSettingsToExtension() {
+        // Send current settings to Chrome extension
+        let settingsManager = SettingsManager.shared
+        print("📤 WebSocketServer: Sending \(settingsManager.agentModels.count) agent models to extension")
+        for (agent, config) in settingsManager.agentModels {
+            print("   Agent \(agent.rawValue): \(config.provider) > \(config.modelName) (temp: \(config.parameters?.temperature ?? 0), topP: \(config.parameters?.topP ?? 0))")
+        }
+        
+        let settingsUpdate: [String: Any] = [
+            "type": "settings_update",
+            "data": [
+                "providers": settingsManager.providers.mapValues { provider in
+                    var dict: [String: Any] = [
+                        "apiKey": provider.apiKey
+                    ]
+                    if let name = provider.name { dict["name"] = name }
+                    if let type = provider.type { dict["type"] = type.rawValue }
+                    if let baseUrl = provider.baseUrl { dict["baseUrl"] = baseUrl }
+                    if let modelNames = provider.modelNames { dict["modelNames"] = modelNames }
+                    if let createdAt = provider.createdAt { dict["createdAt"] = createdAt }
+                    return dict
+                },
+                "agentModels": settingsManager.agentModels.mapValues { config in
+                    var dict: [String: Any] = [
+                        "provider": config.provider,
+                        "modelName": config.modelName
+                    ]
+                    if let params = config.parameters {
+                        dict["parameters"] = [
+                            "temperature": params.temperature,
+                            "topP": params.topP
+                        ]
+                    }
+                    if let reasoningEffort = config.reasoningEffort {
+                        dict["reasoningEffort"] = reasoningEffort
+                    }
+                    return dict
+                }.mapKeys { $0.rawValue }
+            ]
+        ]
+        
+        sendMessage(settingsUpdate)
+    }
+    
+    private func sendGeneralSettingsToExtension() {
+        // Send current general settings to Chrome extension
+        let generalSettingsManager = GeneralSettingsManager.shared
+        
+        let generalSettingsUpdate: [String: Any] = [
+            "type": "general_settings_update",
+            "data": [
+                "maxSteps": generalSettingsManager.maxSteps,
+                "maxActionsPerStep": generalSettingsManager.maxActionsPerStep,
+                "maxFailures": generalSettingsManager.maxFailures,
+                "useVision": generalSettingsManager.useVision,
+                "displayHighlights": generalSettingsManager.displayHighlights,
+                "planningInterval": generalSettingsManager.planningInterval,
+                "minWaitPageLoad": generalSettingsManager.minWaitPageLoad,
+                "replayHistoricalTasks": generalSettingsManager.replayHistoricalTasks
+            ]
+        ]
+        
+        sendMessage(generalSettingsUpdate)
+    }
+    
+    private func sendFirewallSettingsToExtension() {
+        // Send current firewall settings to Chrome extension
+        let firewallManager = FirewallSettingsManager.shared
+        
+        let firewallSettingsUpdate: [String: Any] = [
+            "type": "firewall_settings_update",
+            "data": [
+                "enabled": firewallManager.enabled,
+                "allowList": firewallManager.allowList,
+                "denyList": firewallManager.denyList
+            ]
+        ]
+        
+        sendMessage(firewallSettingsUpdate)
     }
     
     func sendMessage(_ message: [String: Any]) {
@@ -378,10 +505,20 @@ class WebSocketServer {
     func stop() {
         print("🔌 Stopping WebSocket server...")
         stopKeepAlive()
+        
+        // Close connection first
         connection?.cancel()
+        connection = nil
+        
+        // Cancel listener
         listener?.cancel()
+        listener = nil
+        
+        // Reset state
         isWebSocketHandshakeComplete = false
         receivedData.removeAll()
         isServerRunning = false
+        
+        print("✅ WebSocket server stopped")
     }
 }
