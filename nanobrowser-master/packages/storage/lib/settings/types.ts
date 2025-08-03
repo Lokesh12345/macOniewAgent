@@ -35,13 +35,14 @@ export const llmProviderModelNames = {
   [ProviderTypeEnum.DeepSeek]: ['deepseek-chat', 'deepseek-reasoner'],
   [ProviderTypeEnum.Gemini]: ['gemini-2.5-flash', 'gemini-2.5-pro'],
   [ProviderTypeEnum.Grok]: ['grok-3', 'grok-3-fast', 'grok-3-mini', 'grok-3-mini-fast'],
-  [ProviderTypeEnum.Ollama]: ['qwen3:14b', 'falcon3:10b', 'qwen2.5-coder:14b', 'mistral-small:24b'],
+  [ProviderTypeEnum.Ollama]: ['qwen3:14b', 'llama3.1:8b', 'deepseek-browser:latest', 'deepseek-r1:7b', 'qwen2.5vl:7b', 'qwen:7b', 'phi3:mini', 'falcon3:10b', 'qwen2.5-coder:14b', 'mistral-small:24b'],
   [ProviderTypeEnum.AzureOpenAI]: ['gpt-4.1', 'gpt-4.1-mini', 'gpt-4.1-nano', 'gpt-4o', 'gpt-4o-mini', 'o4-mini', 'o3'],
   [ProviderTypeEnum.OpenRouter]: [
     'openai/gpt-4.1',
     'openai/gpt-4.1-mini',
     'openai/o4-mini',
     'openai/gpt-4o-2024-11-20',
+    'openai/gpt-4o-mini',
     'google/gemini-2.5-flash-preview',
   ],
   [ProviderTypeEnum.Groq]: ['llama-3.3-70b-versatile'],
@@ -53,6 +54,62 @@ export const llmProviderModelNames = {
     'Llama-4-Scout-17B-16E-Instruct-FP8',
   ],
   // Custom OpenAI providers don't have predefined models as they are user-defined
+};
+
+// Vision-capable models for each provider
+export const visionCapableModels = {
+  [ProviderTypeEnum.OpenAI]: ['gpt-4.1', 'gpt-4o', 'gpt-4o-mini'],
+  [ProviderTypeEnum.Anthropic]: ['claude-sonnet-4-20250514', 'claude-3-7-sonnet-latest', 'claude-3-5-sonnet-latest'],
+  [ProviderTypeEnum.Gemini]: ['gemini-2.5-flash', 'gemini-2.5-pro'],
+  [ProviderTypeEnum.Ollama]: ['qwen2.5vl:7b', 'llava:latest', 'qwen3:14b'],
+  [ProviderTypeEnum.AzureOpenAI]: ['gpt-4.1', 'gpt-4o', 'gpt-4o-mini'],
+  [ProviderTypeEnum.OpenRouter]: ['openai/gpt-4.1', 'openai/gpt-4o-2024-11-20', 'openai/gpt-4o-mini', 'google/gemini-2.5-flash-preview'],
+  [ProviderTypeEnum.DeepSeek]: [],
+  [ProviderTypeEnum.Grok]: [],
+  [ProviderTypeEnum.Groq]: [],
+  [ProviderTypeEnum.Cerebras]: [],
+  [ProviderTypeEnum.Llama]: [],
+  [ProviderTypeEnum.CustomOpenAI]: [],
+};
+
+// Helper function to check if a model supports vision
+export function isVisionCapableModel(provider: string, model: string): boolean {
+  switch (provider) {
+    case ProviderTypeEnum.OpenAI:
+      return visionCapableModels[ProviderTypeEnum.OpenAI].includes(model);
+    case ProviderTypeEnum.Anthropic:
+      return visionCapableModels[ProviderTypeEnum.Anthropic].includes(model);
+    case ProviderTypeEnum.Gemini:
+      return visionCapableModels[ProviderTypeEnum.Gemini].includes(model);
+    case ProviderTypeEnum.Ollama:
+      return visionCapableModels[ProviderTypeEnum.Ollama].includes(model);
+    case ProviderTypeEnum.AzureOpenAI:
+      return visionCapableModels[ProviderTypeEnum.AzureOpenAI].includes(model);
+    case ProviderTypeEnum.OpenRouter:
+      return visionCapableModels[ProviderTypeEnum.OpenRouter].includes(model);
+    default:
+      return false;
+  }
+}
+
+// Helper function to get all vision-capable models for a provider
+export function getVisionCapableModelsForProvider(provider: string): string[] {
+  switch (provider) {
+    case ProviderTypeEnum.OpenAI:
+      return visionCapableModels[ProviderTypeEnum.OpenAI];
+    case ProviderTypeEnum.Anthropic:
+      return visionCapableModels[ProviderTypeEnum.Anthropic];
+    case ProviderTypeEnum.Gemini:
+      return visionCapableModels[ProviderTypeEnum.Gemini];
+    case ProviderTypeEnum.Ollama:
+      return visionCapableModels[ProviderTypeEnum.Ollama];
+    case ProviderTypeEnum.AzureOpenAI:
+      return visionCapableModels[ProviderTypeEnum.AzureOpenAI];
+    case ProviderTypeEnum.OpenRouter:
+      return visionCapableModels[ProviderTypeEnum.OpenRouter];
+    default:
+      return [];
+  }
 };
 
 // Default parameters for each agent per provider, for providers not specified, use OpenAI parameters

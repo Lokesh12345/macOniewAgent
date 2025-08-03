@@ -55,7 +55,10 @@ export class WebSocketClient {
       this.ws.onmessage = (event) => {
         try {
           const message = JSON.parse(event.data);
-          logger.info('Received message from Mac app:', message);
+          // Only log non-ping/pong messages to reduce noise
+          if (message.type !== 'ping' && message.type !== 'pong') {
+            logger.info('Received message from Mac app:', message);
+          }
           this.handleMessage(message);
         } catch (error) {
           logger.error('Failed to parse WebSocket message:', error);
@@ -117,17 +120,15 @@ export class WebSocketClient {
 
     switch (message.type) {
       case 'pong':
-        // Handle pong response
-        logger.info('Received pong from Mac app');
+        // Handle pong response silently
         break;
       
       case 'ping':
-        // Respond with pong
+        // Respond with pong silently
         this.sendMessage({
           type: 'pong',
           data: { source: 'extension' }
         });
-        logger.info('Received ping, sent pong');
         break;
       
       case 'execute_task':
@@ -258,7 +259,7 @@ export class WebSocketClient {
   }
 
   public sendUserInputRequest(prompt: string, inputType: 'text' | 'choice' | 'confirmation', options?: any) {
-    const inputId = `input_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const inputId = `input_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
     this.sendMessage({
       type: 'user_input_needed',
       data: {
@@ -332,7 +333,7 @@ export class WebSocketClient {
           type: 'ping',
           data: { source: 'extension', timestamp: Date.now() }
         });
-        logger.info('Sent ping to keep connection alive');
+        // Ping sent silently
       }
     }, 25000);
   }
@@ -346,19 +347,19 @@ export class WebSocketClient {
 
   private async applySettingsFromMac(data: any) {
     try {
-      logger.info('Applying settings from Mac app:', data);
-      logger.info('Raw data received:', JSON.stringify(data, null, 2));
+      logger.info('Applying settings from Mac app');
+      // Raw data logging removed to reduce noise
       
       // Import storage modules dynamically to avoid circular dependencies
       const { llmProviderStore, agentModelStore } = await import('@extension/storage');
       
       // Apply provider settings
       if (data.providers) {
-        logger.info('Applying providers:', Object.keys(data.providers));
+        logger.debug('Applying providers:', Object.keys(data.providers));
         for (const [providerId, providerData] of Object.entries(data.providers)) {
           if (typeof providerData === 'object' && providerData !== null) {
             const provider = providerData as any;
-            logger.info(`Setting provider ${providerId}:`, provider);
+            logger.debug(`Setting provider ${providerId}`);
             await llmProviderStore.setProvider(providerId, {
               apiKey: provider.apiKey || '',
               name: provider.name,
@@ -374,15 +375,15 @@ export class WebSocketClient {
       // Apply agent model settings
       if (data.agentModels) {
         const { AgentNameEnum } = await import('@extension/storage');
-        logger.info('Applying agent models:', Object.keys(data.agentModels));
+        logger.debug('Applying agent models:', Object.keys(data.agentModels));
         
         for (const [agentName, modelData] of Object.entries(data.agentModels)) {
-          logger.info(`Processing agent ${agentName}:`, modelData);
+          logger.debug(`Processing agent ${agentName}`);
           if (typeof modelData === 'object' && modelData !== null) {
             const model = modelData as any;
             
             // Map agent name string to AgentNameEnum
-            let agentEnum: string | undefined;
+            let agentEnum: any | undefined;
             // The agentName from Mac app is already lowercase, and AgentNameEnum values are also lowercase
             switch (agentName) {
               case 'planner':
@@ -400,12 +401,7 @@ export class WebSocketClient {
             }
             
             if (agentEnum && model.provider && model.modelName) {
-              logger.info(`Setting agent model for ${agentName}:`, {
-                provider: model.provider,
-                modelName: model.modelName,
-                parameters: model.parameters,
-                reasoningEffort: model.reasoningEffort
-              });
+              logger.debug(`Setting agent model for ${agentName}: ${model.provider}/${model.modelName}`);
               
               await agentModelStore.setAgentModel(agentEnum, {
                 provider: model.provider,
@@ -427,7 +423,7 @@ export class WebSocketClient {
 
   private async applyGeneralSettingsFromMac(data: any) {
     try {
-      logger.info('Applying general settings from Mac app:', data);
+      logger.debug('Applying general settings from Mac app');
       
       // Import storage modules dynamically to avoid circular dependencies
       const { generalSettingsStore } = await import('@extension/storage');
@@ -449,7 +445,7 @@ export class WebSocketClient {
         // Update the extension's general settings store
         await generalSettingsStore.updateSettings(settingsToApply);
         
-        logger.info('General settings successfully applied from Mac app:', settingsToApply);
+        logger.info('General settings successfully applied from Mac app');
       }
       
     } catch (error) {
@@ -459,7 +455,7 @@ export class WebSocketClient {
 
   private async applyFirewallSettingsFromMac(data: any) {
     try {
-      logger.info('Applying firewall settings from Mac app:', data);
+      logger.debug('Applying firewall settings from Mac app');
       
       // Import storage modules dynamically to avoid circular dependencies
       const { firewallStore } = await import('@extension/storage');
@@ -476,7 +472,7 @@ export class WebSocketClient {
         // Update the extension's firewall settings store
         await firewallStore.updateFirewall(firewallSettings);
         
-        logger.info('Firewall settings successfully applied from Mac app:', firewallSettings);
+        logger.info('Firewall settings successfully applied from Mac app');
       }
       
     } catch (error) {

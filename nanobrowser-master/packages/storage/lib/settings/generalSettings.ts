@@ -9,6 +9,8 @@ export interface GeneralSettingsConfig {
   maxFailures: number;
   useVision: boolean;
   useVisionForPlanner: boolean;
+  visionProvider: string;
+  visionModel: string;
   planningInterval: number;
   displayHighlights: boolean;
   minWaitPageLoad: number;
@@ -28,6 +30,8 @@ export const DEFAULT_GENERAL_SETTINGS: GeneralSettingsConfig = {
   maxFailures: 3,
   useVision: false,
   useVisionForPlanner: false,
+  visionProvider: 'ollama',
+  visionModel: 'qwen2.5vl:7b',
   planningInterval: 3,
   displayHighlights: true,
   minWaitPageLoad: 250,

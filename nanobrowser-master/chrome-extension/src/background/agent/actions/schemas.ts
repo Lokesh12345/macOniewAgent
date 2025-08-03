@@ -53,6 +53,17 @@ export const clickElementActionSchema: ActionSchema = {
   }),
 };
 
+export const clickElementVisualActionSchema: ActionSchema = {
+  name: 'click_element_visual',
+  description: 'Click element using natural language description with AI vision analysis. Use this when the element description is clearer than finding by index.',
+  schema: z.object({
+    intent: z.string().default('').describe('purpose of this action'),
+    visual: z.string().describe('natural language description of the element to click (e.g., "blue Submit button", "Sign in link", "search icon")'),
+    near: z.string().optional().describe('optional spatial reference for better targeting (e.g., "near the email field", "at the top right")'),
+    fallback: z.string().optional().describe('CSS selector as fallback if visual detection fails'),
+  }),
+};
+
 export const inputTextActionSchema: ActionSchema = {
   name: 'input_text',
   description: 'Input text into an interactive input element',

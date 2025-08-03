@@ -247,6 +247,21 @@ export default class BrowserContext {
       await this.openTab(url);
       return;
     }
+
+    // Optimization: Check if current page is a blank tab or extension page
+    // If so, open a new tab instead of navigating the current one
+    const currentTab = await chrome.tabs.get(page.tabId);
+    const isBlankOrExtensionTab = !currentTab.url || 
+      currentTab.url === 'chrome://newtab/' || 
+      currentTab.url.startsWith('chrome-extension://') ||
+      currentTab.url === 'about:blank';
+      
+    if (isBlankOrExtensionTab) {
+      logger.info('navigateTo', 'Current tab is blank/extension tab, opening new tab instead:', currentTab.url);
+      await this.openTab(url);
+      return;
+    }
+
     // if page is attached, use puppeteer to navigate to the url
     if (page.attached) {
       await page.navigateTo(url);

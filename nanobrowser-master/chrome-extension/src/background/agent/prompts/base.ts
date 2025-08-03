@@ -81,6 +81,9 @@ ${actionResultsDescription}
 `;
 
     if (browserState.screenshot && context.options.useVision) {
+      // TODO: In Phase 1, integrate dedicated vision model here
+      // const visionModel = createVisionModel(context.options.visionProvider, context.options.visionModel);
+      // For now, images are sent to the current agent's model
       return new HumanMessage({
         content: [
           { type: 'text', text: stateDescription },

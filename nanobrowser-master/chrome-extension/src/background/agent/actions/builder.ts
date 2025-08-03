@@ -1,6 +1,7 @@
 import { ActionResult, type AgentContext } from '@src/background/agent/types';
 import {
   clickElementActionSchema,
+  clickElementVisualActionSchema,
   doneActionSchema,
   goBackActionSchema,
   goToUrlActionSchema,
@@ -274,6 +275,50 @@ export class ActionBuilder {
       true,
     );
     actions.push(clickElement);
+
+    // Visual Click Action - Uses AI vision to find elements by natural language description
+    const clickElementVisual = new Action(
+      async (input: z.infer<typeof clickElementVisualActionSchema.schema>) => {
+        const intent = input.intent || `Click element: "${input.visual}"`;
+        this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_START, intent);
+
+        try {
+          const page = await this.context.browserContext.getCurrentPage();
+          
+          // Use vision settings from agent options
+          const visionProvider = this.context.options.visionProvider || 'ollama';
+          const visionModel = this.context.options.visionModel || 'qwen2.5vl:7b';
+          
+          // Create visual query from input
+          const query = {
+            visual: input.visual,
+            near: input.near,
+            fallback: input.fallback
+          };
+
+          // Perform visual click
+          await page.clickElementVisual(query, visionProvider, visionModel);
+
+          this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_OK, `Successfully clicked: "${input.visual}"`);
+          
+          return {
+            includeInMemory: true,
+            extractedContent: `Clicked element: "${input.visual}"`,
+          };
+
+        } catch (error) {
+          this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_FAIL, `Failed to click: "${input.visual}" - ${error}`);
+          
+          return {
+            includeInMemory: true,
+            error: error instanceof Error ? error.message : String(error),
+          };
+        }
+      },
+      clickElementVisualActionSchema,
+      false, // No index required for visual actions
+    );
+    actions.push(clickElementVisual);
 
     const inputText = new Action(
       async (input: z.infer<typeof inputTextActionSchema.schema>) => {

@@ -318,7 +318,7 @@ export function createChatModel(providerConfig: ProviderConfig, modelConfig: Mod
     }
     case ProviderTypeEnum.OpenRouter: {
       // Call the helper function, passing OpenRouter headers via the third argument
-      console.log('[createChatModel] Calling createOpenAIChatModel for OpenRouter');
+      // Creating OpenAI chat model for OpenRouter
       return createOpenAIChatModel(providerConfig, modelConfig, {
         headers: {
           'HTTP-Referer': 'https://nanobrowser.ai',
@@ -357,4 +357,24 @@ export function createChatModel(providerConfig: ProviderConfig, modelConfig: Mod
       return createOpenAIChatModel(providerConfig, modelConfig, undefined);
     }
   }
+}
+
+// Create a vision model for processing screenshots
+export function createVisionModel(visionProvider: string, visionModel: string): BaseChatModel {
+  const visionModelConfig = {
+    provider: visionProvider,
+    modelName: visionModel,
+    parameters: {
+      temperature: 0.1,
+      topP: 0.1,
+    },
+  };
+  
+  const visionProviderConfig = {
+    apiKey: visionProvider === 'ollama' ? 'ollama' : '',
+    baseUrl: visionProvider === 'ollama' ? 'http://localhost:11434' : undefined,
+    type: visionProvider,
+  };
+  
+  return createChatModel(visionProviderConfig, visionModelConfig);
 }

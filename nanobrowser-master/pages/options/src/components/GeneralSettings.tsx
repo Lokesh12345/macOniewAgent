@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { type GeneralSettingsConfig, generalSettingsStore, DEFAULT_GENERAL_SETTINGS } from '@extension/storage';
+import { ProviderTypeEnum, getVisionCapableModelsForProvider } from '@extension/storage';
 
 interface GeneralSettingsProps {
   isDarkMode?: boolean;
@@ -12,6 +13,12 @@ export const GeneralSettings = ({ isDarkMode = false }: GeneralSettingsProps) =>
     // Load initial settings
     generalSettingsStore.getSettings().then(setSettings);
   }, []);
+
+  // Get available vision models for the selected provider
+  const getAvailableVisionModels = () => {
+    const models = getVisionCapableModelsForProvider(settings.visionProvider);
+    return models.length > 0 ? models : ['qwen2.5vl:7b']; // fallback
+  };
 
   const updateSetting = async <K extends keyof GeneralSettingsConfig>(key: K, value: GeneralSettingsConfig[K]) => {
     // Optimistically update the local state for responsiveness
@@ -128,6 +135,63 @@ export const GeneralSettings = ({ isDarkMode = false }: GeneralSettingsProps) =>
               </label>
             </div>
           </div>
+
+          {settings.useVision && (
+            <>
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className={`text-base font-medium ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                    Vision Provider
+                  </h3>
+                  <p className={`text-sm font-normal ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                    Provider for vision-capable models
+                  </p>
+                </div>
+                <label htmlFor="visionProvider" className="sr-only">
+                  Vision Provider
+                </label>
+                <select
+                  id="visionProvider"
+                  value={settings.visionProvider}
+                  onChange={e => updateSetting('visionProvider', e.target.value)}
+                  className={`rounded-md border ${isDarkMode ? 'border-slate-600 bg-slate-700 text-gray-200' : 'border-gray-300 bg-white text-gray-700'} px-3 py-2 text-sm`}
+                >
+                  <option value="ollama">Ollama</option>
+                  <option value="openai">OpenAI</option>
+                  <option value="anthropic">Anthropic</option>
+                  <option value="gemini">Gemini</option>
+                  <option value="azure_openai">Azure OpenAI</option>
+                  <option value="openrouter">OpenRouter</option>
+                </select>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className={`text-base font-medium ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                    Vision Model
+                  </h3>
+                  <p className={`text-sm font-normal ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                    Specific model for processing screenshots and visual content
+                  </p>
+                </div>
+                <label htmlFor="visionModel" className="sr-only">
+                  Vision Model
+                </label>
+                <select
+                  id="visionModel"
+                  value={settings.visionModel}
+                  onChange={e => updateSetting('visionModel', e.target.value)}
+                  className={`rounded-md border ${isDarkMode ? 'border-slate-600 bg-slate-700 text-gray-200' : 'border-gray-300 bg-white text-gray-700'} px-3 py-2 text-sm min-w-[200px]`}
+                >
+                  {getAvailableVisionModels().map(model => (
+                    <option key={model} value={model}>
+                      {model}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </>
+          )}
 
           <div className="flex items-center justify-between">
             <div>

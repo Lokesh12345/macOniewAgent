@@ -110,7 +110,7 @@ class DOMCache {
               }
               
               invalidationTimeout = window.setTimeout(() => {
-                console.log('🔁 DOM mutated significantly, sending invalidation message');
+                // DOM mutated significantly, sending invalidation message
                 chrome.runtime.sendMessage({ 
                   type: 'DOM_CACHE_INVALIDATE',
                   tabId: chrome.devtools?.inspectedWindow?.tabId || 0

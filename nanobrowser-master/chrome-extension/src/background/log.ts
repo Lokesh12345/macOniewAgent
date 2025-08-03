@@ -6,6 +6,7 @@ interface Logger {
   debug: (...args: unknown[]) => void;
   info: (...args: unknown[]) => void;
   warning: (...args: unknown[]) => void;
+  warn: (...args: unknown[]) => void;  // Backward compatibility alias
   error: (...args: unknown[]) => void;
   group: (label: string) => void;
   groupEnd: () => void;
@@ -26,6 +27,7 @@ const createLogger = (namespace: string): Logger => {
     debug: import.meta.env.DEV ? boundDebug : () => {},
     info: boundInfo,
     warning: boundWarn,
+    warn: boundWarn,  // Backward compatibility alias
     error: boundError,
     group: (label: string) => boundGroup(`${prefix} ${label}`),
     groupEnd: boundGroupEnd,

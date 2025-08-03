@@ -16,6 +16,7 @@ import {
 } from './dom/service';
 import { domCache } from './dom/cache';
 import { enhancedClick, enhancedSetValue } from './dom/handles';
+import { VisualElementDetector, type VisualElementQuery } from './vision/elementDetector';
 import { sessionContext } from '../agent/sessionContext';
 import { DOMElementNode, type DOMState } from './dom/views';
 import { type BrowserContextConfig, DEFAULT_BROWSER_CONTEXT_CONFIG, type PageState, URLNotAllowedError } from './views';
@@ -68,6 +69,7 @@ export default class Page {
   private _validWebPage = false;
   private _cachedState: PageState | null = null;
   private _cachedStateClickableElementsHashes: CachedStateClickableElementsHashes | null = null;
+  private _visualDetector: VisualElementDetector | null = null;
 
   constructor(tabId: number, url: string, title: string, config: Partial<BrowserContextConfig> = {}) {
     this._tabId = tabId;
@@ -1401,6 +1403,100 @@ export default class Page {
       throw new Error(
         `Failed to click element: ${elementNode}. Error: ${error instanceof Error ? error.message : String(error)}`,
       );
+    }
+  }
+
+  /**
+   * Click element using visual description with AI vision
+   */
+  async clickElementVisual(query: VisualElementQuery, visionProvider: string, visionModel: string): Promise<void> {
+    try {
+      // Initialize visual detector if not already done
+      if (!this._visualDetector) {
+        this._visualDetector = new VisualElementDetector(visionProvider, visionModel);
+      }
+
+      // Find element using visual detection
+      const result = await this._visualDetector.findElement(query, this._tabId);
+      
+      if (!result.success || result.matches.length === 0) {
+        throw new Error(`Visual element detection failed: ${result.error || 'No matches found'}`);
+      }
+
+      const bestMatch = result.matches[0];
+      logger.info(`Found element with visual detection (confidence: ${bestMatch.confidence}): ${bestMatch.reasoning}`);
+
+      // Try to click using the selector from vision result
+      if (bestMatch.selector) {
+        try {
+          await this._clickElementBySelector(bestMatch.selector);
+          
+          // Record successful action
+          sessionContext.recordAction({
+            type: 'click',
+            elementInfo: `Visual: "${query.visual}" (${bestMatch.selector})`,
+            url: this.url(),
+            success: true
+          });
+          
+          logger.info(`Successfully clicked element using visual detection: ${query.visual}`);
+          return;
+          
+        } catch (selectorError) {
+          logger.warn(`Selector click failed, trying fallback: ${selectorError}`);
+        }
+      }
+
+      // If we reach here, vision found element but clicking failed
+      throw new Error(`Found element visually but failed to click: ${bestMatch.reasoning}`);
+
+    } catch (error) {
+      // Record failed action
+      sessionContext.recordAction({
+        type: 'click',
+        elementInfo: `Visual: "${query.visual}"`,
+        url: this.url(),
+        success: false,
+        error: error instanceof Error ? error.message : String(error)
+      });
+
+      logger.error(`Visual click failed for "${query.visual}":`, error);
+      throw new Error(`Visual click failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /**
+   * Helper method to click element by CSS selector
+   */
+  private async _clickElementBySelector(selector: string): Promise<void> {
+    if (!this._puppeteerPage) {
+      throw new Error('Puppeteer is not connected');
+    }
+
+    try {
+      // Wait for element to be present
+      await this._puppeteerPage.waitForSelector(selector, { timeout: 5000 });
+      
+      // Get the element
+      const element = await this._puppeteerPage.$(selector);
+      if (!element) {
+        throw new Error(`Element not found with selector: ${selector}`);
+      }
+
+      // Scroll into view
+      await this._scrollIntoViewIfNeeded(element);
+
+      // Click the element
+      await Promise.race([
+        element.click(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Click timeout')), 3000)),
+      ]);
+
+      // Check for navigation
+      await this._checkAndHandleNavigation();
+
+    } catch (error) {
+      throw new Error(`Selector click failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 

@@ -45,7 +45,6 @@ async function injectBuildDomTree(tabId: number) {
     // Check if already injected
     const alreadyInjected = await isScriptInjected(tabId);
     if (alreadyInjected) {
-      console.log('Scripts already injected, skipping...');
       return;
     }
 
@@ -53,7 +52,7 @@ async function injectBuildDomTree(tabId: number) {
       target: { tabId },
       files: ['buildDomTree.js'],
     });
-    console.log('Scripts successfully injected');
+    // Scripts injected successfully
   } catch (err) {
     console.error('Failed to inject scripts:', err);
   }
@@ -68,7 +67,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 // Listen for debugger detached event
 // if canceled_by_user, remove the tab from the browser context
 chrome.debugger.onDetach.addListener(async (source, reason) => {
-  console.log('Debugger detached:', source, reason);
+  logger.debug('Debugger detached:', source, reason);
   if (reason === 'canceled_by_user') {
     if (source.tabId) {
       currentExecutor?.cancel();
@@ -90,55 +89,52 @@ chrome.tabs.onRemoved.addListener(async tabId => {
 
 logger.info('background loaded');
 
-// Initialize WebSocket connection when background script loads
-function initializeWebSocketConnection() {
-  try {
-    logger.info('Initializing WebSocket connection to Mac app...');
-    // Force a fresh connection attempt
-    webSocketClient.forceReconnect();
-    
-    // Request ALL settings from Mac app after connection is established
-    setTimeout(() => {
-      if (webSocketClient.getConnectionStatus()) {
-        logger.info('Requesting all settings from Mac app...');
-        webSocketClient.requestAllSettingsFromMac();
-      }
-    }, 2000);
-  } catch (error) {
-    logger.error('Failed to initialize WebSocket connection:', error);
-  }
-}
+// WebSocket connection disabled - extension uses local settings only
+// function initializeWebSocketConnection() {
+//   try {
+//     logger.info('Initializing WebSocket connection to Mac app...');
+//     webSocketClient.forceReconnect();
+//     
+//     setTimeout(() => {
+//       if (webSocketClient.getConnectionStatus()) {
+//         logger.info('Requesting all settings from Mac app...');
+//         webSocketClient.requestAllSettingsFromMac();
+//       }
+//     }, 2000);
+//   } catch (error) {
+//     logger.error('Failed to initialize WebSocket connection:', error);
+//   }
+// }
 
-// Initialize connection when script loads
-initializeWebSocketConnection();
+// initializeWebSocketConnection();
 
-// Set up periodic connection health check
-setInterval(() => {
-  if (!webSocketClient.getConnectionStatus()) {
-    logger.warning('WebSocket connection lost, attempting to reconnect...');
-    webSocketClient.connect();
-  }
-}, 60000); // Check every 60 seconds
+// Periodic connection health check disabled
+// setInterval(() => {
+//   if (!webSocketClient.getConnectionStatus()) {
+//     logger.warning('WebSocket connection lost, attempting to reconnect...');
+//     webSocketClient.connect();
+//   }
+// }, 60000);
 
-// Handle service worker lifecycle - reconnect when needed
-if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onStartup) {
-  chrome.runtime.onStartup.addListener(() => {
-    logger.info('Chrome startup detected, reinitializing WebSocket...');
-    initializeWebSocketConnection();
-  });
-}
+// Service worker lifecycle handlers disabled for WebSocket
+// if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onStartup) {
+//   chrome.runtime.onStartup.addListener(() => {
+//     logger.info('Chrome startup detected, reinitializing WebSocket...');
+//     initializeWebSocketConnection();
+//   });
+// }
 
-// Also handle when extension is enabled/reloaded
-if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onInstalled) {
-  chrome.runtime.onInstalled.addListener((details) => {
-    if (details.reason === 'install' || details.reason === 'update') {
-      logger.info('Extension installed/updated, initializing WebSocket...');
-      initializeWebSocketConnection();
-    }
-  });
-}
+// if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onInstalled) {
+//   chrome.runtime.onInstalled.addListener((details) => {
+//     if (details.reason === 'install' || details.reason === 'update') {
+//       logger.info('Extension installed/updated, initializing WebSocket...');
+//       initializeWebSocketConnection();
+//     }
+//   });
+// }
 
-// Listen for WebSocket task events
+// WebSocket task events disabled - extension uses side panel only
+/*
 globalThis.addEventListener('websocket-task', async (event: any) => {
   const detail = event.detail;
   logger.info('Received WebSocket task event:', detail);
@@ -204,8 +200,10 @@ globalThis.addEventListener('websocket-task', async (event: any) => {
     logger.error('Failed to process WebSocket task:', error);
   }
 });
+*/
 
-// Listen for WebSocket abort events
+// WebSocket abort events disabled - extension uses side panel only
+/*
 globalThis.addEventListener('websocket-abort', async (event: any) => {
   const detail = event.detail;
   logger.info('Received WebSocket abort event:', detail);
@@ -229,6 +227,7 @@ globalThis.addEventListener('websocket-abort', async (event: any) => {
     logger.error('Failed to abort task:', error);
   }
 });
+*/
 
 // Listen for simple messages (e.g., from options page)
 chrome.runtime.onMessage.addListener(() => {
@@ -412,7 +411,7 @@ chrome.runtime.onConnect.addListener(port => {
 
     port.onDisconnect.addListener(() => {
       // this event is also triggered when the side panel is closed, so we need to cancel the task
-      console.log('Side panel disconnected');
+      logger.debug('Side panel disconnected');
       currentPort = null;
       currentExecutor?.cancel();
     });
@@ -420,8 +419,8 @@ chrome.runtime.onConnect.addListener(port => {
 });
 
 async function setupExecutor(taskId: string, task: string, browserContext: BrowserContext) {
-  // Send LLM thinking update
-  webSocketClient.sendLLMThinking('setup', 'Checking available AI models and API keys...');
+  // WebSocket communication disabled
+  // webSocketClient.sendLLMThinking('setup', 'Checking available AI models and API keys...');
   
   const providers = await llmProviderStore.getAllProviders();
   // if no providers, need to display the options page
@@ -429,7 +428,7 @@ async function setupExecutor(taskId: string, task: string, browserContext: Brows
     throw new Error('Please configure API keys in the settings first');
   }
   
-  webSocketClient.sendLLMThinking('setup', `Found ${Object.keys(providers).length} configured AI providers`);
+  // webSocketClient.sendLLMThinking('setup', `Found ${Object.keys(providers).length} configured AI providers`);
   
   const agentModels = await agentModelStore.getAllAgentModels();
   // verify if every provider used in the agent models exists in the providers
@@ -492,6 +491,8 @@ async function setupExecutor(taskId: string, task: string, browserContext: Brows
       maxActionsPerStep: generalSettings.maxActionsPerStep,
       useVision: generalSettings.useVision,
       useVisionForPlanner: true,
+      visionProvider: generalSettings.visionProvider,
+      visionModel: generalSettings.visionModel,
       planningInterval: generalSettings.planningInterval,
     },
     generalSettings: generalSettings,
@@ -512,8 +513,8 @@ async function subscribeToExecutorEvents(executor: Executor) {
         currentPort.postMessage(event);
       }
       
-      // Also send to Mac app via WebSocket
-      webSocketClient.sendExecutorEvent(event);
+      // Mac app WebSocket communication disabled
+      // webSocketClient.sendExecutorEvent(event);
     } catch (error) {
       logger.error('Failed to send message to side panel:', error);
     }

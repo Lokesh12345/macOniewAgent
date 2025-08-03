@@ -28,7 +28,8 @@
       "Bash(grep:*)",
       "Bash(pnpm type-check:*)",
       "WebFetch(domain:www.technologyreview.com)",
-      "WebFetch(domain:gist.github.com)"
+      "WebFetch(domain:gist.github.com)",
+      "Bash(ollama list:*)"
     ],
     "deny": []
   }

@@ -16,6 +16,8 @@ export interface AgentOptions {
   maxErrorLength: number;
   useVision: boolean;
   useVisionForPlanner: boolean;
+  visionProvider: string;
+  visionModel: string;
   validateOutput: boolean;
   includeAttributes: string[];
   planningInterval: number;
@@ -31,6 +33,8 @@ export const DEFAULT_AGENT_OPTIONS: AgentOptions = {
   maxErrorLength: 400,
   useVision: false,
   useVisionForPlanner: true,
+  visionProvider: 'ollama',
+  visionModel: 'qwen2.5vl:7b',
   validateOutput: true,
   includeAttributes: [
     'title',
