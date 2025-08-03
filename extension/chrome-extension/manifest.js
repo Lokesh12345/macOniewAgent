@@ -39,7 +39,7 @@ function withOperaSidebar(manifest) {
   return deepmerge(manifest, {
     sidebar_action: {
       default_panel: 'side-panel/index.html',
-      default_title: 'Oniew Agent',
+      default_title: 'Nanobrowser',
       default_icon: 'icon-32.png',
     },
   });
@@ -87,7 +87,6 @@ const manifest = withOperaSidebar(
           '*.svg',
           'icon-128.png',
           'icon-32.png',
-          'oniewWhiteLogo.svg',
           'permission/index.html',
           'permission/permission.js',
         ],

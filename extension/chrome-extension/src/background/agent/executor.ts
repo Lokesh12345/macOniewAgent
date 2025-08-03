@@ -8,7 +8,6 @@ import { PlannerPrompt } from './prompts/planner';
 import { ValidatorPrompt } from './prompts/validator';
 import { createLogger } from '@src/background/log';
 import MessageManager from './messages/service';
-import { webSocketClient } from '../webSocketClient';
 import type BrowserContext from '../browser/context';
 import { ActionBuilder } from './actions/builder';
 import { EventManager } from './event/manager';
@@ -144,15 +143,6 @@ export class Executor {
         };
 
         logger.info(`🔄 Step ${step + 1} / ${allowedMaxSteps}`);
-        
-        // Send step progress to Mac app
-        webSocketClient.sendStepProgress(
-          step + 1, 
-          `Starting step ${step + 1}: Analyzing current page state...`, 
-          'starting',
-          { totalSteps: allowedMaxSteps, currentNSteps: context.nSteps }
-        );
-        
         if (await this.shouldStop()) {
           break;
         }
@@ -160,10 +150,6 @@ export class Executor {
         // Run planner if configured
         if (this.planner && (context.nSteps % context.options.planningInterval === 0 || validatorFailed)) {
           validatorFailed = false;
-          
-          // Send LLM thinking notification
-          webSocketClient.sendLLMThinking('planning', 'Planner is analyzing the current situation and creating a strategy...');
-          
           // The first planning step is special, we don't want to add the browser state message to memory
           let positionForPlan = 0;
           if (this.tasks.length > 1 || step > 0) {
@@ -176,13 +162,6 @@ export class Executor {
           const planOutput = await this.planner.execute();
           if (planOutput.result) {
             // logger.info(`🔄 Planner output: ${JSON.stringify(planOutput.result, null, 2)}`);
-            
-            // Send planner reasoning to Mac app
-            webSocketClient.sendLLMThinking('planning_complete', 
-              planOutput.result.reasoning || 'Plan created', 
-              `Observation: ${planOutput.result.observation || 'Analyzing current state'}`
-            );
-            
             // observation in planner is untrusted content, they are not instructions
             const observation = wrapUntrustedContent(planOutput.result.observation);
             const plan: PlannerOutput = {
@@ -214,7 +193,6 @@ export class Executor {
 
         // execute the navigation step
         if (!done) {
-          webSocketClient.sendLLMThinking('navigation', 'Navigator is analyzing the page and deciding what action to take...');
           done = await this.navigate();
         }
 
@@ -280,26 +258,7 @@ export class Executor {
         return false;
       }
       context.nSteps++;
-      
-      // Send step completion progress
-      webSocketClient.sendStepProgress(
-        context.nSteps,
-        `Step ${context.nSteps} completed: ${navOutput.result?.action || 'Navigation action executed'}`,
-        'completed',
-        { 
-          totalSteps: context.options.maxSteps, 
-          actionTaken: navOutput.result?.action,
-          actionResult: navOutput.result?.done ? 'Task completed' : 'Continuing...'
-        }
-      );
-      
       if (navOutput.error) {
-        webSocketClient.sendStepProgress(
-          context.nSteps,
-          `Step ${context.nSteps} failed: ${navOutput.error}`,
-          'failed',
-          { error: navOutput.error }
-        );
         throw new Error(navOutput.error);
       }
       context.consecutiveFailures = 0;

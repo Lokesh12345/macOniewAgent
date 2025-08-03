@@ -14,7 +14,6 @@ import { createChatModel } from './agent/helper';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { DEFAULT_AGENT_OPTIONS } from './agent/types';
 import { SpeechToTextService } from './services/speechToText';
-import { webSocketClient } from './webSocketClient';
 
 const logger = createLogger('background');
 
@@ -83,146 +82,6 @@ chrome.tabs.onRemoved.addListener(tabId => {
 });
 
 logger.info('background loaded');
-
-// Initialize WebSocket connection when background script loads
-function initializeWebSocketConnection() {
-  try {
-    logger.info('Initializing WebSocket connection to Mac app...');
-    // Force a fresh connection attempt
-    webSocketClient.forceReconnect();
-    
-    // Request ALL settings from Mac app after connection is established
-    setTimeout(() => {
-      if (webSocketClient.getConnectionStatus()) {
-        logger.info('Requesting all settings from Mac app...');
-        webSocketClient.requestAllSettingsFromMac();
-      }
-    }, 2000);
-  } catch (error) {
-    logger.error('Failed to initialize WebSocket connection:', error);
-  }
-}
-
-// Initialize connection when script loads
-initializeWebSocketConnection();
-
-// Set up periodic connection health check
-setInterval(() => {
-  if (!webSocketClient.getConnectionStatus()) {
-    logger.warning('WebSocket connection lost, attempting to reconnect...');
-    webSocketClient.connect();
-  }
-}, 60000); // Check every 60 seconds
-
-// Handle service worker lifecycle - reconnect when needed
-if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onStartup) {
-  chrome.runtime.onStartup.addListener(() => {
-    logger.info('Chrome startup detected, reinitializing WebSocket...');
-    initializeWebSocketConnection();
-  });
-}
-
-// Also handle when extension is enabled/reloaded
-if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onInstalled) {
-  chrome.runtime.onInstalled.addListener((details) => {
-    if (details.reason === 'install' || details.reason === 'update') {
-      logger.info('Extension installed/updated, initializing WebSocket...');
-      initializeWebSocketConnection();
-    }
-  });
-}
-
-// Listen for WebSocket task events
-globalThis.addEventListener('websocket-task', async (event: any) => {
-  const detail = event.detail;
-  logger.info('Received WebSocket task event:', detail);
-  
-  try {
-    if (detail.type === 'new_task') {
-      logger.info('Processing WebSocket task:', detail.task);
-      
-      // Send initial task analysis
-      webSocketClient.sendTaskAnalysis(detail.task, 'starting', {
-        message: 'Task received, analyzing requirements...'
-      });
-      
-      // Get current active tab if no tabId specified
-      let tabId = detail.tabId;
-      if (!tabId || tabId === 0) {
-        webSocketClient.sendTaskAnalysis(detail.task, 'tab_analysis', {
-          message: 'Finding active browser tab...'
-        });
-        
-        const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-        if (tabs.length > 0) {
-          tabId = tabs[0].id;
-          logger.info('Using active tab ID:', tabId);
-          webSocketClient.sendTaskAnalysis(detail.task, 'tab_ready', {
-            message: `Using tab: ${tabs[0].title}`,
-            tabId: tabId
-          });
-        }
-      }
-      
-      if (tabId) {
-        try {
-          webSocketClient.sendTaskAnalysis(detail.task, 'setup', {
-            message: 'Setting up AI agents and browser context...'
-          });
-          
-          // Switch to the tab and setup executor
-          await browserContext.switchTab(tabId);
-          currentExecutor = await setupExecutor(detail.taskId, detail.task, browserContext);
-          subscribeToExecutorEvents(currentExecutor);
-          
-          webSocketClient.sendTaskAnalysis(detail.task, 'execution_start', {
-            message: 'AI agents ready, starting task execution...'
-          });
-          
-          const result = await currentExecutor.execute();
-          logger.info('WebSocket task execution result:', result);
-          
-          // Send completion
-          webSocketClient.sendTaskCompletion(true, 'Task completed successfully');
-          
-        } catch (error) {
-          logger.error('Task execution failed:', error);  
-          webSocketClient.sendTaskCompletion(false, undefined, error instanceof Error ? error.message : 'Unknown error');
-        }
-      } else {
-        logger.error('No valid tab ID found for WebSocket task');
-        webSocketClient.sendTaskCompletion(false, undefined, 'No active browser tab found');
-      }
-    }
-  } catch (error) {
-    logger.error('Failed to process WebSocket task:', error);
-  }
-});
-
-// Listen for WebSocket abort events
-globalThis.addEventListener('websocket-abort', async (event: any) => {
-  const detail = event.detail;
-  logger.info('Received WebSocket abort event:', detail);
-  
-  try {
-    if (detail.type === 'abort_task') {
-      logger.info('Aborting current task:', detail.reason);
-      
-      // Cancel the current executor
-      if (currentExecutor) {
-        await currentExecutor.cancel();
-        logger.info('Current task cancelled successfully');
-        
-        // Send task completion notification
-        webSocketClient.sendTaskCompletion(false, undefined, 'Task aborted by user');
-      } else {
-        logger.warning('No current executor to abort');
-      }
-    }
-  } catch (error) {
-    logger.error('Failed to abort task:', error);
-  }
-});
 
 // Listen for simple messages (e.g., from options page)
 chrome.runtime.onMessage.addListener(() => {
@@ -414,17 +273,11 @@ chrome.runtime.onConnect.addListener(port => {
 });
 
 async function setupExecutor(taskId: string, task: string, browserContext: BrowserContext) {
-  // Send LLM thinking update
-  webSocketClient.sendLLMThinking('setup', 'Checking available AI models and API keys...');
-  
   const providers = await llmProviderStore.getAllProviders();
   // if no providers, need to display the options page
   if (Object.keys(providers).length === 0) {
     throw new Error('Please configure API keys in the settings first');
   }
-  
-  webSocketClient.sendLLMThinking('setup', `Found ${Object.keys(providers).length} configured AI providers`);
-  
   const agentModels = await agentModelStore.getAllAgentModels();
   // verify if every provider used in the agent models exists in the providers
   for (const agentModel of Object.values(agentModels)) {
@@ -505,9 +358,6 @@ async function subscribeToExecutorEvents(executor: Executor) {
       if (currentPort) {
         currentPort.postMessage(event);
       }
-      
-      // Also send to Mac app via WebSocket
-      webSocketClient.sendExecutorEvent(event);
     } catch (error) {
       logger.error('Failed to send message to side panel:', error);
     }

@@ -1086,9 +1086,9 @@ const SidePanel = () => {
               <div
                 className={`flex flex-1 items-center justify-center p-8 ${isDarkMode ? 'text-sky-300' : 'text-sky-600'}`}>
                 <div className="max-w-md text-center">
-                  <img src="/oniewWhiteLogo.svg" alt="Oniew Agent Logo" className="mx-auto mb-4 size-12" />
+                  <img src="/icon-128.png" alt="Nanobrowser Logo" className="mx-auto mb-4 size-12" />
                   <h3 className={`mb-2 text-lg font-semibold ${isDarkMode ? 'text-sky-200' : 'text-sky-700'}`}>
-                    Welcome to Oniew Agent!
+                    Welcome to Nanobrowser!
                   </h3>
                   <p className="mb-4">To get started, please configure your API keys in the settings page.</p>
                   <button
