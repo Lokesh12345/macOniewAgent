@@ -214,6 +214,7 @@ window.buildDomTree = (
    * @type {Object<string, any>}
    */
   const DOM_HASH_MAP = {};
+  const ELEMENT_HANDLE_MAP = new WeakMap(); // Store actual DOM elements for direct access
 
   const ID = { current: 0 };
 
@@ -1456,6 +1457,12 @@ window.buildDomTree = (
 
     const id = `${ID.current++}`;
     DOM_HASH_MAP[id] = nodeData;
+    
+    // Store element handle for direct access
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      ELEMENT_HANDLE_MAP.set(nodeData, node);
+    }
+    
     if (debugMode) PERF_METRICS.nodeMetrics.processedNodes++;
     return id;
   }
@@ -1529,5 +1536,43 @@ window.buildDomTree = (
     }
   }
 
-  return debugMode ? { rootId, map: DOM_HASH_MAP, perfMetrics: PERF_METRICS } : { rootId, map: DOM_HASH_MAP };
+  // Add global function to get element handle by nodeData
+  window.getElementHandle = (nodeData) => {
+    return ELEMENT_HANDLE_MAP.get(nodeData);
+  };
+  
+  // Add function to perform direct actions on elements
+  window.performElementAction = (nodeData, action, value) => {
+    const element = ELEMENT_HANDLE_MAP.get(nodeData);
+    if (!element) return false;
+    
+    try {
+      switch (action) {
+        case 'click':
+          element.click();
+          return true;
+        case 'focus':
+          element.focus();
+          return true;
+        case 'setValue':
+          if (element.value !== undefined) {
+            element.value = value;
+            element.dispatchEvent(new Event('input', { bubbles: true }));
+            element.dispatchEvent(new Event('change', { bubbles: true }));
+            return true;
+          }
+          break;
+        case 'scroll':
+          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          return true;
+      }
+    } catch (error) {
+      console.warn('Element action failed:', error);
+    }
+    return false;
+  };
+
+  return debugMode 
+    ? { rootId, map: DOM_HASH_MAP, handleMap: ELEMENT_HANDLE_MAP, perfMetrics: PERF_METRICS }
+    : { rootId, map: DOM_HASH_MAP, handleMap: ELEMENT_HANDLE_MAP };
 };

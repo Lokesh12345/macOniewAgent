@@ -25,6 +25,7 @@ import { convertZodToJsonSchema, repairJsonString } from '@src/background/utils'
 import { HistoryTreeProcessor } from '@src/background/browser/dom/history/service';
 import { AgentStepRecord } from '../history';
 import { type DOMHistoryElement } from '@src/background/browser/dom/history/view';
+import { sessionContext } from '../sessionContext';
 
 const logger = createLogger('NavigatorAgent');
 

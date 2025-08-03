@@ -1,7 +1,5 @@
 import 'webextension-polyfill';
 import {
-  connect,
-  ExtensionTransport,
   type HTTPRequest,
   type HTTPResponse,
   type ProtocolType,
@@ -11,11 +9,14 @@ import type { Browser } from 'puppeteer-core/lib/esm/puppeteer/api/Browser.js';
 import type { Page as PuppeteerPage } from 'puppeteer-core/lib/esm/puppeteer/api/Page.js';
 import type { ElementHandle } from 'puppeteer-core/lib/esm/puppeteer/api/ElementHandle.js';
 import type { Frame } from 'puppeteer-core/lib/esm/puppeteer/api/Frame.js';
+import { puppeteerPool } from './puppeteer-pool';
 import {
-  getClickableElements as _getClickableElements,
   removeHighlights as _removeHighlights,
   getScrollInfo as _getScrollInfo,
 } from './dom/service';
+import { domCache } from './dom/cache';
+import { enhancedClick, enhancedSetValue } from './dom/handles';
+import { sessionContext } from '../agent/sessionContext';
 import { DOMElementNode, type DOMState } from './dom/views';
 import { type BrowserContextConfig, DEFAULT_BROWSER_CONTEXT_CONFIG, type PageState, URLNotAllowedError } from './views';
 import { createLogger } from '@src/background/log';
@@ -104,15 +105,16 @@ export default class Page {
     }
 
     logger.info('attaching puppeteer', this._tabId);
-    const browser = await connect({
-      transport: await ExtensionTransport.connectTab(this._tabId),
-      defaultViewport: null,
-      protocol: 'cdp' as ProtocolType,
-    });
-    this._browser = browser;
+    
+    // Use persistent connection from pool
+    const connection = await puppeteerPool.getConnection(this._tabId);
+    if (!connection) {
+      logger.error('Failed to get connection from pool for tab', this._tabId);
+      return false;
+    }
 
-    const [page] = await browser.pages();
-    this._puppeteerPage = page;
+    this._browser = connection.browser;
+    this._puppeteerPage = connection.page;
 
     // Add anti-detection scripts
     await this._addAntiDetectionScripts();
@@ -164,7 +166,8 @@ export default class Page {
 
   async detachPuppeteer(): Promise<void> {
     if (this._browser) {
-      await this._browser.disconnect();
+      // Don't disconnect - keep connection in pool for reuse
+      // await this._browser.disconnect();
       this._browser = null;
       this._puppeteerPage = null;
       // reset the state
@@ -182,7 +185,7 @@ export default class Page {
     if (!this._validWebPage) {
       return null;
     }
-    return _getClickableElements(
+    return domCache.getClickableElements(
       this._tabId,
       this.url(),
       showHighlightElements,
@@ -511,7 +514,22 @@ export default class Page {
     try {
       await Promise.all([this.waitForPageAndFramesLoad(), this._puppeteerPage.goto(url)]);
       logger.info('navigateTo complete');
+      
+      // Update session context with new URL
+      sessionContext.setCurrentUrl(url);
+      sessionContext.recordAction({
+        type: 'navigate',
+        url: url,
+        success: true
+      });
     } catch (error) {
+      // Record failed navigation
+      sessionContext.recordAction({
+        type: 'navigate',
+        url: url,
+        success: false,
+        error: error instanceof Error ? error.message : String(error)
+      });
       if (error instanceof URLNotAllowedError) {
         throw error;
       }
@@ -1104,6 +1122,17 @@ export default class Page {
     }
 
     try {
+      // First attempt: Try enhanced setValue with direct element handle
+      const directSuccess = await enhancedSetValue(this._tabId, elementNode, text, async () => {
+        return false; // Will be handled by the fallback below
+      });
+      
+      if (directSuccess) {
+        await this.waitForPageAndFramesLoad();
+        return;
+      }
+
+      // Fallback: Use traditional Puppeteer approach
       // Highlight before typing
       // if (elementNode.highlightIndex != null) {
       //   await this._updateState(useVision, elementNode.highlightIndex);
@@ -1183,7 +1212,26 @@ export default class Page {
 
       // Wait for page stability after input
       await this.waitForPageAndFramesLoad();
+      
+      // Record successful action in session context
+      sessionContext.recordAction({
+        type: 'input',
+        elementInfo: `${elementNode.tagName}[${elementNode.highlightIndex}]`,
+        value: text,
+        url: this.url(),
+        success: true
+      });
     } catch (error) {
+      // Record failed action in session context
+      sessionContext.recordAction({
+        type: 'input',
+        elementInfo: `${elementNode.tagName}[${elementNode.highlightIndex}]`,
+        value: text,
+        url: this.url(),
+        success: false,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      
       const errorMsg = `Failed to input text into element: ${elementNode}. Error: ${error instanceof Error ? error.message : String(error)}`;
       logger.error(errorMsg);
       throw new Error(errorMsg);
@@ -1288,46 +1336,68 @@ export default class Page {
     }
 
     try {
-      // Highlight before clicking
-      // if (elementNode.highlightIndex !== null) {
-      //   await this._updateState(useVision, elementNode.highlightIndex);
-      // }
-
-      const element = await this.locateElement(elementNode);
-      if (!element) {
-        throw new Error(`Element: ${elementNode} not found`);
-      }
-
-      // Scroll element into view if needed
-      await this._scrollIntoViewIfNeeded(element);
-
-      try {
-        // First attempt: Use Puppeteer's click method with timeout
-        await Promise.race([
-          element.click(),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('Click timeout')), 2000)),
-        ]);
-        await this._checkAndHandleNavigation();
-      } catch (error) {
-        // if URLNotAllowedError, throw it
-        if (error instanceof URLNotAllowedError) {
-          throw error;
+      // First attempt: Try enhanced click with direct element handle
+      const directSuccess = await enhancedClick(this._tabId, elementNode, async () => {
+        // Fallback: Use traditional Puppeteer approach
+        const element = await this.locateElement(elementNode);
+        if (!element) {
+          throw new Error(`Element: ${elementNode} not found`);
         }
-        // Second attempt: Use evaluate to perform a direct click
-        logger.info('Failed to click element, trying again', error);
+
+        // Scroll element into view if needed
+        await this._scrollIntoViewIfNeeded(element);
+
         try {
-          await element.evaluate(el => (el as HTMLElement).click());
-        } catch (secondError) {
+          // First attempt: Use Puppeteer's click method with timeout
+          await Promise.race([
+            element.click(),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('Click timeout')), 2000)),
+          ]);
+          await this._checkAndHandleNavigation();
+          return true;
+        } catch (error) {
           // if URLNotAllowedError, throw it
-          if (secondError instanceof URLNotAllowedError) {
-            throw secondError;
+          if (error instanceof URLNotAllowedError) {
+            throw error;
           }
-          throw new Error(
-            `Failed to click element: ${secondError instanceof Error ? secondError.message : String(secondError)}`,
-          );
+          // Second attempt: Use evaluate to perform a direct click
+          logger.info('Failed to click element, trying again', error);
+          try {
+            await element.evaluate(el => (el as HTMLElement).click());
+            return true;
+          } catch (secondError) {
+            // if URLNotAllowedError, throw it
+            if (secondError instanceof URLNotAllowedError) {
+              throw secondError;
+            }
+            throw new Error(
+              `Failed to click element: ${secondError instanceof Error ? secondError.message : String(secondError)}`,
+            );
+          }
         }
+      });
+
+      if (directSuccess) {
+        await this._checkAndHandleNavigation();
+        
+        // Record successful action in session context
+        sessionContext.recordAction({
+          type: 'click',
+          elementInfo: `${elementNode.tagName}[${elementNode.highlightIndex}]`,
+          url: this.url(),
+          success: true
+        });
       }
     } catch (error) {
+      // Record failed action in session context
+      sessionContext.recordAction({
+        type: 'click',
+        elementInfo: `${elementNode.tagName}[${elementNode.highlightIndex}]`,
+        url: this.url(),
+        success: false,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      
       throw new Error(
         `Failed to click element: ${elementNode}. Error: ${error instanceof Error ? error.message : String(error)}`,
       );

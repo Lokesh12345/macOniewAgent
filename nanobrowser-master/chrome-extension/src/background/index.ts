@@ -78,8 +78,14 @@ chrome.debugger.onDetach.addListener(async (source, reason) => {
 });
 
 // Cleanup when tab is closed
-chrome.tabs.onRemoved.addListener(tabId => {
+chrome.tabs.onRemoved.addListener(async tabId => {
   browserContext.removeAttachedPage(tabId);
+  // Also cleanup persistent connection from pool
+  const { puppeteerPool } = await import('./browser/puppeteer-pool');
+  await puppeteerPool.disconnect(tabId);
+  // Cleanup DOM cache for the tab
+  const { domCache } = await import('./browser/dom/cache');
+  domCache.invalidate(tabId);
 });
 
 logger.info('background loaded');

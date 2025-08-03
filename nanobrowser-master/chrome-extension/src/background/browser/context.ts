@@ -61,6 +61,14 @@ export default class BrowserContext {
     }
     this._attachedPages.clear();
     this._currentTabId = null;
+    
+    // Clean up all persistent connections
+    const { puppeteerPool } = await import('./puppeteer-pool');
+    await puppeteerPool.cleanup();
+    
+    // Clean up all DOM caches
+    const { domCache } = await import('./dom/cache');
+    domCache.clear();
   }
 
   public async attachPage(page: Page): Promise<boolean> {

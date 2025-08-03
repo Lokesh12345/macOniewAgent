@@ -1,0 +1,268 @@
+🔧 PHASE 1: Puppeteer & Browser Context Optimization (MUST DO FIRST)
+🎯 Objective: Ensure that browser automation is stable, fast, and persistent across steps.
+
+✅ Checklist:
+Create a centralized BrowserManager.ts
+
+📍 File: utils/browserManager.ts
+
+🔧 Use a singleton to maintain a persistent Puppeteer connection
+
+🧠 Avoid calling puppeteer.connect() or launch() on every step
+
+Preserve tabs across agents
+
+📍 Inside Navigator → store tabId or pageId
+
+🔧 Reuse same tab for all actions unless explicitly told to open a new one
+
+Avoid full DOM rebuild if already cached
+
+📍 Content script (content.js)
+
+🔧 Cache DOM tree on first read, only refresh if mutationObserver detects major layout change
+
+Preserve DOM element handles
+
+🔧 Instead of using string-based selectors every time, store element handles where possible (e.g., .click() directly)
+
+⚠️ Needs injection-side support, may require WeakMap to avoid memory leaks
+
+Maintain shared memory across agents
+
+📍 Shared object: sessionContext.ts
+
+🧠 Store planner/navigator/validator shared context here — current URL, last action, etc.
+
+Reconnect logic for tab reloads
+
+🔧 Detect if content script reloaded (e.g., after Gmail compose box opens)
+
+🔁 Re-inject agent code but reuse old memory/state
+
+👨‍💻 Assigned to: Infra Engineer / Navigator Dev
+
+🧱 PHASE 2: Core Agent Loop Setup
+🎯 Objective: Establish a stable loop that converts user goals into a plan, executes it, and validates success.
+
+✅ Checklist:
+Inject actual user goal into planner.ts
+
+📍 planner.ts
+
+🔧 Accept dynamic input instead of hardcoded test cases
+
+Call qwen3:14B via Ollama inside Planner
+
+📍 llm/qwen-planner.ts
+
+🧠 Use fetch('http://localhost:11434/api/generate') with body including temp and top_p
+
+Parse planner output JSON
+
+📍 planner.ts
+
+🔧 Parse next_steps, reasoning, done flag from LLM response
+
+Pass steps to builder.ts
+
+📍 builder.ts
+
+🔧 Convert planner output into ActionStep[] → e.g. type: click, selector: input[name=q], etc.
+
+Navigator executes actions
+
+📍 navigator.ts
+
+🧠 Use DOM tree or page object from browserManager to run actions (click, type, scroll)
+
+Validator checks results
+
+📍 validator.ts
+
+🔧 Basic validation for now — verify element exists or URL matches expected
+
+Log final result
+
+📍 logger.ts
+
+🧠 Store JSON object: { goal, steps, success, reasoning, timestamp }
+
+👨‍💻 Assigned to: Planner Engineer, Navigator Dev, Validator Dev
+
+Let me know if you want the same level of detailed breakdown for Phase 3 onward — batching, vision, memory, smart retry, etc.
+
+
+
+
+ChatGPT said:
+Here’s the continued To-Do list with full implementation notes and developer roles — for Phases 3, 4, 5, and Final Hardening:
+
+🧠 PHASE 3: Multi-Step Action Batching
+🎯 Objective: Mimic human-like behavior — perform grouped actions (like filling a form) without validating after each one.
+
+✅ Checklist:
+Planner supports batch: true
+
+📍 planner.ts → modify prompt template
+
+🔧 LLM should output { steps: [...], batch: true }
+
+🧠 Update agent call to handle and expect batch flag
+
+Create ActionBatchExecutor.ts
+
+📍 New file: action/ActionBatchExecutor.ts
+
+🔧 Accepts array of actions and runs them in sequence
+
+🧠 Use same Puppeteer tab and DOM snapshot
+
+Skip Validator until entire batch finishes
+
+📍 navigator.ts
+
+🔧 Add optional skipValidation: true flag
+
+✅ Validate only once per batch
+
+Log batch context
+
+📍 logger.ts
+
+🧠 Mark logs with batch_id, steps count, and result
+
+👨‍💻 Assigned to: Planner Dev, Batch Handler Dev
+
+👁️ PHASE 4: Vision Fallback System
+🎯 Objective: Use screenshot + OCR when DOM fails (canvas, Figma, Canva, etc.)
+
+✅ Checklist:
+Capture screenshot of current Chrome tab
+
+📍 Chrome Extension background
+
+🔧 Use chrome.tabs.captureVisibleTab() with format: 'png'
+
+Run OCR+VL model via Ollama
+
+📍 visionAgent.ts
+
+🧠 Use qwen2.5vl:7b with prompt like:
+“Here is a screenshot and goal: {goal}. What elements are visible?”
+
+Parse detected UI elements
+
+📍 visionAgent.ts
+
+🔧 Extract bounding boxes, text labels, and type (button/input)
+
+Match clicks to OCR regions
+
+📍 navigator.ts fallback branch
+
+🧠 Use coordinates from OCR and chrome.scripting.executeScript() to click visually
+
+Vision Planner if DOM completely fails
+
+📍 New planner-vision.ts
+
+🔧 Same planning logic, but prompt should describe visible UI from vision result
+
+👨‍💻 Assigned to: Vision Agent Dev, Screenshot Dev
+
+🧠 PHASE 5: Agent Memory & Smart Retry
+🎯 Objective: Enable intelligent retry, avoid repeating successful steps, and persist memory across pages.
+
+✅ Checklist:
+Build AgentMemoryManager.ts
+
+📍 New file: memory/AgentMemoryManager.ts
+
+🔧 Store:
+
+Last 10 actions
+
+Current tab ID, current goal
+
+DOM elements interacted
+
+Use memory in Planner
+
+📍 planner.ts
+
+🧠 Inject memory context before goal (e.g., “You already clicked X”)
+
+Skip redundant steps
+
+📍 navigator.ts
+
+🔧 If element already clicked and not changed, skip
+
+SmartRetryManager.ts
+
+📍 New file
+
+🔧 Retry with:
+
+Alternative selectors
+
+Scrolling
+
+Tab refresh
+
+Vision fallback (if DOM fails twice)
+
+Log retries with reasons
+
+📍 logger.ts
+
+🧠 Add retry_count, fallback_used, failure_reason
+
+👨‍💻 Assigned to: Memory Dev, Retry Handler Dev
+
+📦 FINAL PHASE: UX, Logs, UI & Metrics
+🎯 Objective: Production polish — visibility into agent behavior, success %, debugging, replay.
+
+✅ Checklist:
+Agent Side Panel UI
+
+📍 popup.html + sidepanel.html
+
+🔧 Show live: current goal, step in progress, batch ID, fallback used
+
+Visual Step Trace
+
+📍 DOM overlay script
+
+🧠 Highlight each clicked element during execution
+
+Logs & Replay
+
+📍 logger.ts
+
+🔧 Store logs in IndexedDB or chrome.storage.local
+
+✅ Add export as .json option
+
+Metrics Dashboard
+
+📍 dashboard.ts
+
+🧠 Track:
+
+% goals completed
+
+Avg steps per task
+
+Retry rate
+
+Fallback usage
+
+Model auto-switching logic
+
+📍 llm/modelRouter.ts
+
+🔧 Route to cheaper/faster model based on token count or temp config
+
+👨‍💻 Assigned to: UI Dev, Infra Dev, Analyst Dev

@@ -24,6 +24,7 @@ import { URLNotAllowedError } from '../browser/views';
 import { chatHistoryStore } from '@extension/storage/lib/chat';
 import type { AgentStepHistory } from './history';
 import type { GeneralSettingsConfig } from '@extension/storage';
+import { sessionContext } from './sessionContext';
 
 const logger = createLogger('Executor');
 
@@ -125,6 +126,13 @@ export class Executor {
    */
   async execute(): Promise<void> {
     logger.info(`🚀 Executing task: ${this.tasks[this.tasks.length - 1]}`);
+    
+    // Initialize session context
+    sessionContext.setGoal(this.tasks[this.tasks.length - 1]);
+    sessionContext.setAgentState('navigator', 'idle');
+    sessionContext.setAgentState('planner', 'idle');
+    sessionContext.setAgentState('validator', 'idle');
+    
     // reset the step counter
     const context = this.context;
     context.nSteps = 0;
