@@ -25,7 +25,8 @@
       "Bash(pnpm dev:*)",
       "Bash(xcodebuild:*)",
       "mcp__ide__getDiagnostics",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(npm run build:*)"
     ],
     "deny": []
   }

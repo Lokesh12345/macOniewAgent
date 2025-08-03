@@ -5,6 +5,7 @@ import {
   firewallStore,
   generalSettingsStore,
   llmProviderStore,
+  initializeDefaults,
 } from '@extension/storage';
 import BrowserContext from './browser/context';
 import { Executor } from './agent/executor';
@@ -82,6 +83,11 @@ chrome.tabs.onRemoved.addListener(tabId => {
 });
 
 logger.info('background loaded');
+
+// Initialize defaults for fresh installations
+initializeDefaults().catch(error => {
+  console.error('Failed to initialize defaults:', error);
+});
 
 // Listen for simple messages (e.g., from options page)
 chrome.runtime.onMessage.addListener(() => {
