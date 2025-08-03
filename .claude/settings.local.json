@@ -26,7 +26,9 @@
       "Bash(xcodebuild:*)",
       "mcp__ide__getDiagnostics",
       "Bash(grep:*)",
-      "Bash(pnpm type-check:*)"
+      "Bash(pnpm type-check:*)",
+      "WebFetch(domain:www.technologyreview.com)",
+      "WebFetch(domain:gist.github.com)"
     ],
     "deny": []
   }

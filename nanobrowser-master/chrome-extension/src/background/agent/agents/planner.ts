@@ -13,6 +13,8 @@ import {
   LLM_FORBIDDEN_ERROR_MESSAGE,
   RequestCancelledError,
 } from './errors';
+import { sessionContext } from '../sessionContext';
+import { getContextSummaryForPrompt } from '../contextHelper';
 const logger = createLogger('PlannerAgent');
 
 // Define Zod schema for planner output
@@ -49,10 +51,28 @@ export class PlannerAgent extends BaseAgent<typeof plannerOutputSchema, PlannerO
   async execute(): Promise<AgentOutput<PlannerOutput>> {
     try {
       this.context.emitEvent(Actors.PLANNER, ExecutionState.STEP_START, 'Planning...');
+      
+      // Update agent state in session context
+      sessionContext.setAgentState('planner', 'working');
+      
       // get all messages from the message manager, state message should be the last one
       const messages = this.context.messageManager.getMessages();
-      // Use full message history except the first one
-      const plannerMessages = [this.prompt.getSystemMessage(), ...messages.slice(1)];
+      
+      // Inject dynamic context into planner messages
+      const contextSummary = getContextSummaryForPrompt();
+      const dynamicContextMessage = new HumanMessage(`
+Current Session Context:
+${contextSummary}
+
+Please analyze the current situation and provide your planning insights based on this context.
+`);
+      
+      // Use full message history with dynamic context
+      const plannerMessages = [
+        this.prompt.getSystemMessage(), 
+        dynamicContextMessage,
+        ...messages.slice(1)
+      ];
 
       // Remove images from last message if vision is not enabled for planner but vision is enabled
       if (!this.context.options.useVisionForPlanner && this.context.options.useVision) {
@@ -80,11 +100,18 @@ export class PlannerAgent extends BaseAgent<typeof plannerOutputSchema, PlannerO
       this.context.emitEvent(Actors.PLANNER, ExecutionState.STEP_OK, modelOutput.next_steps);
       logger.info('Planner output', JSON.stringify(modelOutput, null, 2));
 
+      // Update agent state based on completion
+      sessionContext.setAgentState('planner', modelOutput.done ? 'completed' : 'idle');
+
       return {
         id: this.id,
         result: modelOutput,
       };
     } catch (error) {
+      // Update agent state on error
+      sessionContext.setAgentState('planner', 'failed');
+      sessionContext.setError(error instanceof Error ? error.message : String(error));
+      
       // Check if this is an authentication error
       if (isAuthenticationError(error)) {
         throw new ChatModelAuthError('Planner API Authentication failed. Please verify your API key', error);
