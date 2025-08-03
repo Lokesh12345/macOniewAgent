@@ -100,6 +100,7 @@ export interface PageState extends DOMState {
   scrollY: number;
   scrollHeight: number;
   visualViewportHeight: number;
+  lastUpdated?: number; // Timestamp for caching optimization
 }
 
 export interface TabInfo {

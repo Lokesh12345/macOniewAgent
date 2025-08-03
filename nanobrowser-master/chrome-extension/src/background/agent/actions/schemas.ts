@@ -213,3 +213,30 @@ export const waitActionSchema: ActionSchema = {
     seconds: z.number().int().default(3).describe('amount of seconds'),
   }),
 };
+
+export const refreshPageActionSchema: ActionSchema = {
+  name: 'refresh_page',
+  description: 'Refresh the current page when page is stuck or needs to be reloaded',
+  schema: z.object({
+    intent: z.string().default('').describe('purpose of this action'),
+  }),
+};
+
+export const dismissModalActionSchema: ActionSchema = {
+  name: 'dismiss_modal',
+  description: 'Dismiss popups, modals, dialogs, or cookie banners by pressing Escape key or looking for close buttons',
+  schema: z.object({
+    intent: z.string().default('').describe('purpose of this action'),
+    method: z.enum(['escape', 'find_close_button']).default('escape').describe('method to dismiss modal'),
+  }),
+};
+
+export const uploadFileActionSchema: ActionSchema = {
+  name: 'upload_file',
+  description: 'Upload a file to a file input element - NOTE: This is a simulation for testing, actual file upload requires user interaction',
+  schema: z.object({
+    intent: z.string().default('').describe('purpose of this action'),
+    index: z.number().int().describe('index of the file input element'),
+    filename: z.string().describe('name of file to simulate uploading'),
+  }),
+};

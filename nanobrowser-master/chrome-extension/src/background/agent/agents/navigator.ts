@@ -28,6 +28,230 @@ import { type DOMHistoryElement } from '@src/background/browser/dom/history/view
 
 const logger = createLogger('NavigatorAgent');
 
+// Simple element cache for frequently accessed elements
+class ElementCache {
+  private cache = new Map<string, any>();
+  private relationships = new Map<string, string[]>(); // Track element relationships
+  private maxSize = 50; // Keep cache small
+
+  set(key: string, element: any): void {
+    if (this.cache.size >= this.maxSize) {
+      // Remove oldest entry
+      const firstKey = this.cache.keys().next().value;
+      this.cache.delete(firstKey);
+      this.relationships.delete(firstKey);
+    }
+    this.cache.set(key, element);
+    
+    // Track common UI patterns (simple heuristics)
+    if (element && element.tagName) {
+      this.trackRelationships(key, element);
+    }
+  }
+
+  private trackRelationships(key: string, element: any): void {
+    const related: string[] = [];
+    
+    // Common form patterns
+    if (element.tagName === 'input' && element.attributes?.type === 'text') {
+      // Look for nearby submit buttons
+      related.push('button', 'input[type=submit]');
+    } else if (element.tagName === 'button' || (element.tagName === 'input' && element.attributes?.type === 'submit')) {
+      // Look for nearby input fields
+      related.push('input[type=text]', 'input[type=email]', 'input[type=password]');
+    }
+    
+    if (related.length > 0) {
+      this.relationships.set(key, related);
+    }
+  }
+
+  get(key: string): any {
+    return this.cache.get(key);
+  }
+
+  getRelated(key: string): string[] {
+    return this.relationships.get(key) || [];
+  }
+
+  clear(): void {
+    this.cache.clear();
+    this.relationships.clear();
+  }
+}
+
+const elementCache = new ElementCache();
+
+// Dynamic site optimization based on patterns and page characteristics
+class SiteOptimizer {
+  detectSiteCharacteristics(url: string, pageContent?: string): Record<string, any> {
+    const characteristics = {
+      isEmailService: false,
+      isSearchEngine: false,
+      isEcommerce: false,
+      isCodeRepository: false,
+      isSocialMedia: false,
+      hasDynamicContent: false,
+      isMediaHeavy: false,
+      requiresAuth: false
+    };
+
+    // Validate URL before parsing
+    if (!url || typeof url !== 'string' || url.trim() === '') {
+      return characteristics; // Return default characteristics for invalid URL
+    }
+
+    const urlLower = url.toLowerCase();
+    let domain = '';
+    
+    try {
+      domain = new URL(url).hostname;
+    } catch (error) {
+      // Invalid URL format - return default characteristics
+      logger.warning(`Invalid URL in detectSiteCharacteristics: ${url}`);
+      return characteristics;
+    }
+    
+    // Detect patterns without hardcoding specific sites
+    characteristics.isEmailService = /mail|email|inbox|compose/i.test(urlLower) || 
+                                    (pageContent && /compose|inbox|sent|draft/i.test(pageContent || ''));
+    
+    characteristics.isSearchEngine = /search|query|\?q=|&q=/i.test(urlLower) ||
+                                    (pageContent && /<input[^>]*search[^>]*>/i.test(pageContent || ''));
+    
+    characteristics.isEcommerce = /shop|store|cart|checkout|product|buy/i.test(urlLower) ||
+                                 (pageContent && /add to cart|buy now|price|shipping/i.test(pageContent || ''));
+    
+    characteristics.isCodeRepository = /repo|code|commit|pull|issue|branch/i.test(urlLower) ||
+                                      (pageContent && /repository|commits|branches|pull request/i.test(pageContent || ''));
+    
+    characteristics.isSocialMedia = /social|feed|post|profile|follow|share/i.test(urlLower) ||
+                                   (pageContent && /timeline|friends|followers|likes/i.test(pageContent || ''));
+    
+    // Detect dynamic content indicators
+    characteristics.hasDynamicContent = pageContent ? 
+      /react|angular|vue|ajax|fetch|websocket/i.test(pageContent) : false;
+    
+    // Detect media-heavy pages
+    characteristics.isMediaHeavy = pageContent ? 
+      (pageContent.match(/<img/gi)?.length || 0) > 10 ||
+      (pageContent.match(/<video/gi)?.length || 0) > 0 : false;
+    
+    // Detect auth requirements
+    characteristics.requiresAuth = /login|signin|auth|account/i.test(urlLower) ||
+                                  (pageContent && /password|username|email.*login/i.test(pageContent || ''));
+    
+    return characteristics;
+  }
+
+  getOptimizedWait(actionName: string, url: string, pageCharacteristics?: Record<string, any>): number {
+    const chars = pageCharacteristics || this.detectSiteCharacteristics(url);
+    
+    // Dynamic timing based on page characteristics
+    let baseWait = 500; // Default wait time
+    
+    // Adjust based on action type
+    if (actionName === 'go_to_url' || actionName === 'refresh_page') {
+      baseWait = 2000; // Page navigation base
+      
+      if (chars.isMediaHeavy) baseWait += 1000; // Media-heavy pages need more time
+      if (chars.hasDynamicContent) baseWait += 500; // Dynamic content needs settling time
+      if (chars.isEcommerce) baseWait += 500; // E-commerce sites often have complex layouts
+    } else if (actionName === 'click_element') {
+      baseWait = 500; // Click action base
+      
+      if (chars.isEmailService) baseWait += 300; // Email services often have animations
+      if (chars.hasDynamicContent) baseWait += 200; // Dynamic content may trigger updates
+    } else if (actionName === 'input_text') {
+      baseWait = 200; // Input action base
+      
+      if (chars.isSearchEngine) baseWait = 100; // Search engines have instant feedback
+      if (chars.isEcommerce) baseWait += 200; // E-commerce search may have suggestions
+    }
+    
+    return baseWait;
+  }
+
+  getSmartSelectors(intent: string, pageCharacteristics?: Record<string, any>): string[] {
+    const selectors: string[] = [];
+    const intentLower = intent.toLowerCase();
+    
+    // Generate selectors based on intent patterns
+    if (intentLower.includes('search')) {
+      selectors.push(
+        'input[type="search"]',
+        'input[placeholder*="search" i]',
+        'input[aria-label*="search" i]',
+        'input[name="q"]',
+        'input[name*="search" i]',
+        'input[name*="query" i]'
+      );
+    }
+    
+    if (intentLower.includes('compose') || intentLower.includes('new')) {
+      selectors.push(
+        'button[aria-label*="compose" i]',
+        'button[aria-label*="new" i]',
+        'button[aria-label*="create" i]',
+        'a[href*="compose"]',
+        'button:has-text("New")',
+        'button:has-text("Compose")'
+      );
+    }
+    
+    if (intentLower.includes('login') || intentLower.includes('sign')) {
+      selectors.push(
+        'input[type="email"]',
+        'input[type="password"]',
+        'input[name*="user" i]',
+        'input[name*="email" i]',
+        'button[type="submit"]',
+        'button:has-text("Sign in")',
+        'button:has-text("Log in")'
+      );
+    }
+    
+    return selectors;
+  }
+
+  handleDynamicError(error: string, url: string, pageCharacteristics?: Record<string, any>): string | null {
+    const chars = pageCharacteristics || this.detectSiteCharacteristics(url);
+    const errorLower = error.toLowerCase();
+    
+    // Dynamic error handling based on patterns
+    if (errorLower.includes('element not found')) {
+      if (chars.hasDynamicContent) {
+        return 'Page has dynamic content. Wait for elements to load or try refreshing.';
+      }
+      if (chars.requiresAuth) {
+        return 'Page may require authentication. Ensure you are logged in.';
+      }
+      return 'Element not found. The page structure may have changed. Try alternative selectors.';
+    }
+    
+    if (errorLower.includes('timeout')) {
+      if (chars.isMediaHeavy) {
+        return 'Media-heavy page detected. Allow more time for loading.';
+      }
+      if (chars.isEcommerce) {
+        return 'Complex page structure. Consider breaking down the action into smaller steps.';
+      }
+      return 'Operation timed out. Check internet connection or try again.';
+    }
+    
+    if (errorLower.includes('navigation')) {
+      if (chars.requiresAuth) {
+        return 'Navigation blocked. Check if authentication is required.';
+      }
+      return 'Navigation failed. Verify the URL is correct and accessible.';
+    }
+    
+    return null; // No specific handling
+  }
+}
+
+const siteOptimizer = new SiteOptimizer();
+
 interface ParsedModelOutput {
   current_state?: {
     next_goal?: string;
@@ -141,68 +365,123 @@ export class NavigatorAgent extends BaseAgent<z.ZodType, NavigatorResult> {
   }
 
   async execute(): Promise<AgentOutput<NavigatorResult>> {
+    logger.info('🧭 NAVIGATOR EXECUTE START');
+    logger.info(`🔍 Navigator ID: ${this.id}`);
+    
     const agentOutput: AgentOutput<NavigatorResult> = {
       id: this.id,
     };
+
+    // Note: Browser state will be fetched when needed in doActions method
 
     let cancelled = false;
     let modelOutputString: string | null = null;
     let browserStateHistory: BrowserStateHistory | null = null;
     let actionResults: ActionResult[] = [];
+    
+    logger.info('📊 Initial state: cancelled=false, actionResults=[], browserStateHistory=null');
 
     try {
+      logger.info('📡 Emitting STEP_START event...');
       this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.STEP_START, 'Navigating...');
 
       const messageManager = this.context.messageManager;
-      // add the browser state message
+      logger.info('🧠 Adding browser state to memory...');
       await this.addStateMessageToMemory();
+      
+      logger.info('🌐 Getting current page state...');
       const currentState = await this.context.browserContext.getCachedState();
+      logger.info(`📄 Current State: url="${currentState.url}", title="${currentState.title}"`);
+      logger.info(`🌳 DOM Tree: ${currentState.elementTree ? 'Available' : 'Missing'}`);
+      
       browserStateHistory = new BrowserStateHistory(currentState);
+      logger.info('📚 Browser state history created');
 
       // check if the task is paused or stopped
+      logger.info(`🔄 Checking execution state: paused=${this.context.paused}, stopped=${this.context.stopped}`);
       if (this.context.paused || this.context.stopped) {
+        logger.info('⏸️ Task paused or stopped - cancelling navigator execution');
         cancelled = true;
         return agentOutput;
       }
 
       // call the model to get the actions to take
       const inputMessages = messageManager.getMessages();
-      // logger.info('Navigator input message', inputMessages[inputMessages.length - 1]);
-
+      logger.info(`💬 Input messages count: ${inputMessages.length}`);
+      logger.info(`💬 Last message type: ${inputMessages[inputMessages.length - 1]?.constructor.name || 'None'}`);
+      
+      logger.info('🤖 CALLING LLM MODEL...');
+      const startTime = Date.now();
       const modelOutput = await this.invoke(inputMessages);
+      const llmDuration = Date.now() - startTime;
+      logger.info(`🤖 LLM RESPONSE RECEIVED in ${llmDuration}ms`);
+      logger.info(`📝 Model Output Keys: ${Object.keys(modelOutput).join(', ')}`);
 
       // check if the task is paused or stopped
+      logger.info(`🔄 Checking execution state after LLM: paused=${this.context.paused}, stopped=${this.context.stopped}`);
       if (this.context.paused || this.context.stopped) {
+        logger.info('⏸️ Task paused or stopped after LLM call - cancelling');
         cancelled = true;
         return agentOutput;
       }
 
+      logger.info('🔧 Fixing actions format...');
       const actions = this.fixActions(modelOutput);
+      logger.info(`🎯 Actions count: ${actions.length}`);
+      actions.forEach((action, index) => {
+        const actionName = Object.keys(action)[0];
+        logger.info(`  Action ${index + 1}: ${actionName}`);
+      });
+      
       modelOutput.action = actions;
       modelOutputString = JSON.stringify(modelOutput);
+      logger.info('💾 Model output stringified for storage');
 
       // remove the last state message from memory before adding the model output
+      logger.info('🗑️ Removing last state message from memory...');
       this.removeLastStateMessageFromMemory();
+      logger.info('💭 Adding model output to memory...');
       this.addModelOutputToMemory(modelOutput);
 
       // take the actions
+      logger.info('🎬 EXECUTING ACTIONS...');
+      const actionStartTime = Date.now();
       actionResults = await this.doMultiAction(actions);
-      // logger.info('Action results', JSON.stringify(actionResults, null, 2));
+      const actionDuration = Date.now() - actionStartTime;
+      logger.info(`🎬 ACTIONS COMPLETED in ${actionDuration}ms`);
+      logger.info(`📊 Action Results: ${actionResults.length} results`);
+      actionResults.forEach((result, index) => {
+        logger.info(`  Result ${index + 1}: success=${!result.error}, done=${result.isDone}, content="${result.extractedContent?.substring(0, 50) || 'None'}..."`);
+        if (result.error) {
+          logger.error(`    Error: ${result.error}`);
+        }
+      });
 
+      logger.info('💾 Storing action results in context...');
       this.context.actionResults = actionResults;
 
       // check if the task is paused or stopped
+      logger.info(`🔄 Final execution state check: paused=${this.context.paused}, stopped=${this.context.stopped}`);
       if (this.context.paused || this.context.stopped) {
+        logger.info('⏸️ Task paused or stopped after actions - cancelling');
         cancelled = true;
         return agentOutput;
       }
+      
       // emit event
+      logger.info('📡 Emitting STEP_OK event...');
       this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.STEP_OK, 'Navigation done');
+      
       let done = false;
       if (actionResults.length > 0 && actionResults[actionResults.length - 1].isDone) {
         done = true;
+        logger.info('✅ Task marked as DONE by final action');
+      } else {
+        logger.info('🔄 Task NOT done - will continue');
       }
+      
       agentOutput.result = { done };
+      logger.info(`🧭 NAVIGATOR EXECUTE END - returning done=${done}`);
       return agentOutput;
     } catch (error) {
       this.removeLastStateMessageFromMemory();
@@ -258,12 +537,143 @@ export class NavigatorAgent extends BaseAgent<z.ZodType, NavigatorResult> {
   }
 
   /**
+   * Check for errors or misalignment and suggest corrections
+   */
+  private async checkForErrorsAndCorrections(): Promise<void> {
+    try {
+      const currentState = await this.context.browserContext.getCachedState();
+      const currentTask = this.context.messageManager.getMessages()
+        .find(m => m.content?.toString().includes('Task to execute:'))
+        ?.content?.toString()
+        .match(/Task to execute: "([^"]*)"/) 
+        ?.[1] || '';
+
+      // Analyze recent action results for errors or misalignment
+      const recentResults = this.context.actionResults.slice(-3);
+      const hasErrors = recentResults.some(r => r.error);
+      const recentPages = this.context.history.history.slice(-2).map(h => h.browserStateHistory?.getCurrentState().url);
+      
+      // Detect common mistakes using intelligent pattern matching
+      let correctionNeeded = false;
+      let correctionMessage = '';
+
+      // 1. Extract key entities from task (domains, actions, targets)
+      const taskLower = currentTask.toLowerCase();
+      const taskWords = taskLower.split(/\s+/);
+      
+      // Extract potential domains/sites mentioned in task
+      const domainPattern = /(?:on|at|in|to|from)\s+(\w+(?:\.\w+)?)/g;
+      const mentionedDomains: string[] = [];
+      let match;
+      while ((match = domainPattern.exec(taskLower)) !== null) {
+        mentionedDomains.push(match[1]);
+      }
+
+      // Extract action keywords
+      const searchKeywords = ['search', 'find', 'look for', 'query'];
+      const isSearchTask = searchKeywords.some(keyword => taskLower.includes(keyword));
+      
+      // 2. Check for task-URL alignment without hardcoding
+      let currentDomain = '';
+      let currentDomainBase = '';
+      try {
+        if (currentState.url && currentState.url.trim() !== '' && (currentState.url.startsWith('http://') || currentState.url.startsWith('https://'))) {
+          currentDomain = new URL(currentState.url).hostname.replace('www.', '');
+          currentDomainBase = currentDomain.split('.')[0]; // Get base domain name
+        }
+      } catch (urlError) {
+        logger.warning(`Failed to parse URL for domain extraction: ${currentState.url}`);
+        // Continue without domain-based checks
+      }
+      
+      // Check if current domain matches any mentioned domains (only if we have a valid domain)
+      const isOnMentionedDomain = currentDomain ? mentionedDomains.some(domain => 
+        currentDomain.includes(domain) || domain.includes(currentDomainBase)
+      ) : false;
+
+      // 3. Intelligent error detection based on patterns
+      if (mentionedDomains.length > 0 && currentDomain && !isOnMentionedDomain) {
+        // We're on a different domain than what's mentioned in the task
+        correctionNeeded = true;
+        correctionMessage = `🚨 TASK MISALIGNMENT: Task mentions "${mentionedDomains.join(', ')}" but you are on "${currentDomain}". Navigate to the correct site for the task.`;
+      }
+
+      // 4. Check for search intent vs current page
+      if (isSearchTask && !currentState.url.includes('search') && !currentState.url.includes('q=')) {
+        // Search task but not on a search page
+        const pageText = currentState.elementTree?.getAllTextTillNextClickableElement() || '';
+        const clickableText = currentState.elementTree?.clickableElementsToString() || '';
+        const hasSearchBox = pageText.toLowerCase().includes('search') || 
+                           clickableText.toLowerCase().includes('search');
+        if (!hasSearchBox) {
+          correctionNeeded = true;
+          correctionMessage = '🚨 SEARCH TASK ISSUE: Task requires searching but current page lacks search functionality. Navigate to a search-capable page.';
+        }
+      }
+
+      // 5. Check for repeated failures without hardcoding specific sites
+      if (recentPages.length >= 2) {
+        const uniqueDomains = new Set(recentPages.map(url => {
+          try {
+            return new URL(url || '').hostname;
+          } catch {
+            return '';
+          }
+        }));
+        
+        if (uniqueDomains.size >= 3 && mentionedDomains.length > 0) {
+          correctionNeeded = true;
+          correctionMessage = `🚨 NAVIGATION ISSUE: Visited ${uniqueDomains.size} different sites without completing the task. Focus on the task requirements.`;
+        }
+      }
+
+      // 6. Check for repeated errors
+      if (hasErrors) {
+        const errorTypes = recentResults
+          .filter(r => r.error)
+          .map(r => {
+            const error = r.error?.toString() || '';
+            if (error.includes('not found')) return 'element not found';
+            if (error.includes('timeout')) return 'timeout';
+            if (error.includes('navigation')) return 'navigation error';
+            return 'action failed';
+          });
+        
+        const uniqueErrors = [...new Set(errorTypes)];
+        correctionNeeded = true;
+        correctionMessage = `🚨 REPEATED ERRORS: ${uniqueErrors.join(', ')}. Current approach is not working - try a different strategy.`;
+      }
+
+      // Add correction message if needed
+      if (correctionNeeded) {
+        this.context.messageManager.addSystemMessage(`ERROR CORRECTION NEEDED:
+${correctionMessage}
+
+Current page: ${currentState.title} (${currentState.url})
+Original task: "${currentTask}"
+
+IMMEDIATE ACTION REQUIRED: Fix this error in your next action. Do not proceed with other actions until you are on the correct page for the task.`);
+        
+        logger.warning(`Error correction needed: ${correctionMessage}`);
+      }
+
+    } catch (error) {
+      logger.error(`❌ Error correction check failed: ${error instanceof Error ? error.message : String(error)}`);
+      logger.error(`Error stack: ${error instanceof Error ? error.stack : 'No stack trace'}`);
+    }
+  }
+
+  /**
    * Add the state message to the memory
    */
   public async addStateMessageToMemory() {
     if (this.context.stateMessageAdded) {
       return;
     }
+
+    // Check for errors and suggest corrections before adding state
+    // TODO: Fix this function - currently causing errors
+    // await this.checkForErrorsAndCorrections();
 
     const messageManager = this.context.messageManager;
     // Handle results that should be included in memory
@@ -358,6 +768,7 @@ export class NavigatorAgent extends BaseAgent<z.ZodType, NavigatorResult> {
 
     const browserContext = this.context.browserContext;
     const browserState = await browserContext.getState(this.context.options.useVision);
+    
     const cachedPathHashes = await calcBranchPathHashSet(browserState);
 
     await browserContext.removeHighlight();
@@ -390,18 +801,45 @@ export class NavigatorAgent extends BaseAgent<z.ZodType, NavigatorResult> {
                 includeInMemory: true,
               }),
             );
+            logger.info('🛑 Stopping action sequence due to page changes');
             break;
+          } else {
+            logger.info('✅ Page unchanged - continuing with action sequence');
           }
         }
 
+        logger.info(`🎬 Executing action: ${actionName}...`);
+        const actionStartTime = Date.now();
         const result = await actionInstance.call(actionArgs);
+        const actionDuration = Date.now() - actionStartTime;
+        logger.info(`🎬 Action completed in ${actionDuration}ms`);
+        logger.info(`📄 Action result: success=${!result.error}, done=${result.isDone}`);
+        if (result.extractedContent) {
+          logger.info(`📝 Extracted content: "${result.extractedContent.substring(0, 100)}..."`);
+        }
+        if (result.error) {
+          logger.error(`❌ Action error: ${result.error}`);
+        }
+        
         if (result === undefined) {
+          logger.error(`❌ Action ${actionName} returned undefined`);
           throw new Error(`Action ${actionName} returned undefined`);
         }
 
         // if the action has an index argument, record the interacted element to the result
         if (indexArg !== null) {
-          const domElement = browserState.selectorMap.get(indexArg);
+          const elementKey = `${browserState.url}_${indexArg}`;
+          
+          // Try to get from cache first
+          let domElement = elementCache.get(elementKey);
+          if (!domElement) {
+            domElement = browserState.selectorMap.get(indexArg);
+            // Cache the element for future use
+            if (domElement) {
+              elementCache.set(elementKey, domElement);
+            }
+          }
+
           if (domElement) {
             const interactedElement = HistoryTreeProcessor.convertDomElementToHistoryElement(domElement);
             result.interactedElement = interactedElement;
@@ -415,21 +853,34 @@ export class NavigatorAgent extends BaseAgent<z.ZodType, NavigatorResult> {
         if (this.context.paused || this.context.stopped) {
           return results;
         }
-        // TODO: wait for 1 second for now, need to optimize this to avoid unnecessary waiting
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        // Smart waiting with dynamic optimization
+        const pageContent = browserState.elementTree?.getAllTextTillNextClickableElement().substring(0, 1000) || ''; // Sample for characteristics
+        const waitTime = siteOptimizer.getOptimizedWait(actionName, browserState.url, 
+          siteOptimizer.detectSiteCharacteristics(browserState.url, pageContent));
+        
+        await new Promise(resolve => setTimeout(resolve, waitTime));
       } catch (error) {
         if (error instanceof URLNotAllowedError) {
           throw error;
         }
         const errorMessage = error instanceof Error ? error.message : String(error);
+        
+        // Try dynamic error handling
+        const pageContent = browserState.elementTree?.getAllTextTillNextClickableElement().substring(0, 1000) || '';
+        const dynamicAdvice = siteOptimizer.handleDynamicError(errorMessage, browserState.url,
+          siteOptimizer.detectSiteCharacteristics(browserState.url, pageContent));
+        const finalErrorMessage = dynamicAdvice ? 
+          `${errorMessage} (Suggestion: ${dynamicAdvice})` : 
+          errorMessage;
+        
         logger.error(
           'doAction error',
           actionName,
           JSON.stringify(actionArgs, null, 2),
-          JSON.stringify(errorMessage, null, 2),
+          JSON.stringify(finalErrorMessage, null, 2),
         );
         // unexpected error, emit event
-        this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_FAIL, errorMessage);
+        this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_FAIL, finalErrorMessage);
         errCount++;
         if (errCount > 3) {
           throw new Error('Too many errors in actions');

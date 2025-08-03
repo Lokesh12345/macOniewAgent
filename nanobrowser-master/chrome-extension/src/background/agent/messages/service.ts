@@ -1,4 +1,4 @@
-import { type BaseMessage, AIMessage, HumanMessage, type SystemMessage, ToolMessage } from '@langchain/core/messages';
+import { type BaseMessage, AIMessage, HumanMessage, SystemMessage, ToolMessage } from '@langchain/core/messages';
 import { MessageHistory, MessageMetadata } from '@src/background/agent/messages/views';
 import { createLogger } from '@src/background/log';
 import { wrapUserRequest } from '@src/background/agent/messages/utils';
@@ -45,6 +45,17 @@ export default class MessageManager {
     this.settings = settings;
     this.history = new MessageHistory();
     this.toolId = 1;
+  }
+
+  /**
+   * Add a system message to the conversation
+   */
+  public addSystemMessage(content: string): void {
+    const systemMessage = new SystemMessage({
+      content: content,
+    });
+    this.addMessageWithTokens(systemMessage, 'system');
+    logger.info('Added system message to conversation');
   }
 
   public initTaskMessages(systemMessage: SystemMessage, task: string, messageContext?: string): void {
@@ -217,6 +228,9 @@ export default class MessageManager {
   }
 
   public getMessages(): BaseMessage[] {
+    // Limit history to recent steps before preparing messages
+    this.limitRecentHistory(3);
+    
     const messages = this.history.messages
       .filter(m => {
         if (!m.message) {
@@ -331,6 +345,37 @@ export default class MessageManager {
    */
   private _countTextTokens(text: string): number {
     return Math.floor(text.length / this.settings.estimatedCharactersPerToken);
+  }
+
+  /**
+   * Limits history to last N steps to reduce context size
+   * @param maxSteps - Maximum number of recent steps to keep (default: 3)
+   */
+  public limitRecentHistory(maxSteps: number = 3): void {  
+    const messages = this.history.messages;
+    
+    // Find human messages (which typically mark step boundaries)
+    const humanMessageIndexes: number[] = [];
+    for (let i = 0; i < messages.length; i++) {
+      if (messages[i].message instanceof HumanMessage) {
+        humanMessageIndexes.push(i);
+      }
+    }
+    
+    // If we have more than maxSteps human messages, remove older ones
+    if (humanMessageIndexes.length > maxSteps) {
+      const cutoffIndex = humanMessageIndexes[humanMessageIndexes.length - maxSteps];
+      const removedMessages = messages.splice(0, cutoffIndex);
+      
+      // Update total tokens
+      let removedTokens = 0;
+      for (const removedMsg of removedMessages) {
+        removedTokens += removedMsg.metadata.tokens;
+      }
+      this.history.totalTokens -= removedTokens;
+      
+      logger.debug(`Limited history to last ${maxSteps} steps. Removed ${removedMessages.length} messages (${removedTokens} tokens). Total: ${this.history.totalTokens} tokens`);
+    }
   }
 
   /**

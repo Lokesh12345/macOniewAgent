@@ -51,36 +51,66 @@ export class ValidatorAgent extends BaseAgent<typeof validatorOutputSchema, Vali
    * @returns AgentOutput<ValidatorOutput>
    */
   async execute(): Promise<AgentOutput<ValidatorOutput>> {
+    logger.info('🕵️ VALIDATOR EXECUTE START');
+    logger.info(`🔍 Validator ID: ${this.id}`);
+    
     try {
+      logger.info('📡 Emitting VALIDATOR STEP_START event...');
       this.context.emitEvent(Actors.VALIDATOR, ExecutionState.STEP_START, 'Validating...');
 
+      logger.info('🌍 Getting current state message...');
       let stateMessage = await this.prompt.getUserMessage(this.context);
+      
       if (this.plan) {
+        logger.info('📋 Adding plan to validation context...');
+        logger.info(`📅 Plan: ${this.plan}`);
         // merge the plan and the state message
         const mergedMessage = new HumanMessage(`${stateMessage.content}\n\nThe current plan is: \n${this.plan}`);
         stateMessage = mergedMessage;
+      } else {
+        logger.info('📝 No plan provided - validating without plan context');
       }
-      // logger.info('validator input', stateMessage);
 
+      logger.info('📄 Building validator input messages...');
       const systemMessage = this.prompt.getSystemMessage();
       const inputMessages = [systemMessage, stateMessage];
+      logger.info(`📝 Validator input messages: ${inputMessages.length} messages`);
 
+      logger.info('🤖 CALLING VALIDATOR LLM MODEL...');
+      const validatorStartTime = Date.now();
       const modelOutput = await this.invoke(inputMessages);
+      const validatorDuration = Date.now() - validatorStartTime;
+      logger.info(`🤖 VALIDATOR LLM RESPONSE RECEIVED in ${validatorDuration}ms`);
+      
       if (!modelOutput) {
+        logger.error('❌ Failed to validate task result');
         throw new Error('Failed to validate task result');
       }
 
-      logger.info('validator output', JSON.stringify(modelOutput, null, 2));
+      logger.info('📄 Validator output:', JSON.stringify(modelOutput, null, 2));
+      logger.info(`✅ Validation result: ${modelOutput.is_valid ? 'VALID' : 'INVALID'}`);
+      if (modelOutput.reason) {
+        logger.info(`📝 Validation reason: ${modelOutput.reason}`);
+      }
+      if (modelOutput.answer) {
+        logger.info(`💬 Validation answer: ${modelOutput.answer}`);
+      }
 
       if (!modelOutput.is_valid) {
         // need to update the action results so that other agents can see the error
         const msg = `The answer is not yet correct. ${modelOutput.reason}.`;
+        logger.warning(`❌ Validation failed: ${msg}`);
+        logger.info('📡 Emitting VALIDATOR STEP_FAIL event...');
         this.context.emitEvent(Actors.VALIDATOR, ExecutionState.STEP_FAIL, msg);
+        logger.info('💾 Adding validation failure to action results...');
         this.context.actionResults = [new ActionResult({ extractedContent: msg, includeInMemory: true })];
       } else {
+        logger.info('✅ Validation successful!');
+        logger.info('📡 Emitting VALIDATOR STEP_OK event...');
         this.context.emitEvent(Actors.VALIDATOR, ExecutionState.STEP_OK, modelOutput.answer);
       }
 
+      logger.info('🕵️ VALIDATOR EXECUTE END - SUCCESS');
       return {
         id: this.id,
         result: modelOutput,

@@ -172,6 +172,18 @@ export default class Page {
     }
   }
 
+  /**
+   * Ensure Puppeteer connection is active, reconnect if needed
+   */
+  private async ensurePuppeteerConnection(): Promise<void> {
+    if (!this._puppeteerPage) {
+      logger.warning('Puppeteer connection lost, attempting to reconnect...');
+      if (!(await this.attachPuppeteer())) {
+        throw new Error('Failed to reconnect Puppeteer - please refresh the page');
+      }
+    }
+  }
+
   async removeHighlight(): Promise<void> {
     if (this._config.displayHighlights && this._validWebPage) {
       await _removeHighlights(this._tabId);
@@ -201,9 +213,7 @@ export default class Page {
 
   // Get scroll position information for a specific element.
   async getElementScrollInfo(elementNode: DOMElementNode): Promise<[number, number, number]> {
-    if (!this._puppeteerPage) {
-      throw new Error('Puppeteer is not connected');
-    }
+    await this.ensurePuppeteerConnection();
 
     const element = await this.locateElement(elementNode);
     if (!element) {
@@ -395,6 +405,25 @@ export default class Page {
     try {
       await this.removeHighlight();
 
+      // Quick page change detection to avoid unnecessary DOM rebuilds
+      const currentUrl = this.url();
+      const currentTitle = await this.title();
+      
+      // If we have cached state and URL + title haven't changed, consider reusing it
+      if (this._cachedState && 
+          this._cachedState.url === currentUrl && 
+          this._cachedState.title === currentTitle &&
+          focusElement === -1 && // Don't skip if focusing on specific element
+          !useVision) { // Don't skip if taking screenshot
+        
+        // Check if page was recently updated (within last 30 seconds)
+        const cacheAge = Date.now() - (this._state.lastUpdated || 0);
+        if (cacheAge < 30000) {
+          logger.debug('Page unchanged, reusing cached DOM state');
+          return this._cachedState;
+        }
+      }
+
       // Get DOM content (equivalent to dom_service.get_clickable_elements)
       // This part would need to be implemented based on your DomService logic
       // showHighlightElements is true if either useVision or displayHighlights is true
@@ -430,6 +459,7 @@ export default class Page {
       this._state.scrollY = scrollY;
       this._state.visualViewportHeight = visualViewportHeight;
       this._state.scrollHeight = scrollHeight;
+      this._state.lastUpdated = Date.now(); // Add timestamp for caching optimization
       return this._state;
     } catch (error) {
       logger.error('Failed to update state:', error);
@@ -594,9 +624,7 @@ export default class Page {
   // if elementNode is provided, scroll to a percentage of the element
   // if elementNode is not provided, scroll to a percentage of the page
   async scrollToPercent(yPercent: number, elementNode?: DOMElementNode): Promise<void> {
-    if (!this._puppeteerPage) {
-      throw new Error('Puppeteer is not connected');
-    }
+    await this.ensurePuppeteerConnection();
     if (!elementNode) {
       await this._puppeteerPage.evaluate(yPercent => {
         const scrollHeight = document.documentElement.scrollHeight;
@@ -634,9 +662,7 @@ export default class Page {
   }
 
   async scrollBy(y: number, elementNode?: DOMElementNode): Promise<void> {
-    if (!this._puppeteerPage) {
-      throw new Error('Puppeteer is not connected');
-    }
+    await this.ensurePuppeteerConnection();
     if (!elementNode) {
       await this._puppeteerPage.evaluate(y => {
         window.scrollBy({
@@ -667,9 +693,7 @@ export default class Page {
   }
 
   async scrollToPreviousPage(elementNode?: DOMElementNode): Promise<void> {
-    if (!this._puppeteerPage) {
-      throw new Error('Puppeteer is not connected');
-    }
+    await this.ensurePuppeteerConnection();
 
     if (!elementNode) {
       // Scroll the whole page up by viewport height
@@ -694,9 +718,7 @@ export default class Page {
   }
 
   async scrollToNextPage(elementNode?: DOMElementNode): Promise<void> {
-    if (!this._puppeteerPage) {
-      throw new Error('Puppeteer is not connected');
-    }
+    await this.ensurePuppeteerConnection();
 
     if (!elementNode) {
       // Scroll the whole page down by viewport height
@@ -838,9 +860,7 @@ export default class Page {
   }
 
   async scrollToText(text: string, nth: number = 1): Promise<boolean> {
-    if (!this._puppeteerPage) {
-      throw new Error('Puppeteer is not connected');
-    }
+    await this.ensurePuppeteerConnection();
 
     try {
       // Convert text to lowercase for consistent searching
@@ -1099,9 +1119,7 @@ export default class Page {
   }
 
   async inputTextElementNode(useVision: boolean, elementNode: DOMElementNode, text: string): Promise<void> {
-    if (!this._puppeteerPage) {
-      throw new Error('Puppeteer is not connected');
-    }
+    await this.ensurePuppeteerConnection();
 
     try {
       // Highlight before typing
@@ -1283,9 +1301,7 @@ export default class Page {
   }
 
   async clickElementNode(useVision: boolean, elementNode: DOMElementNode): Promise<void> {
-    if (!this._puppeteerPage) {
-      throw new Error('Puppeteer is not connected');
-    }
+    await this.ensurePuppeteerConnection();
 
     try {
       // Highlight before clicking

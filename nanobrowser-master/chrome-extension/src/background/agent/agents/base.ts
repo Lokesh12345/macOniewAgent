@@ -118,6 +118,53 @@ export abstract class BaseAgent<T extends z.ZodType, M = unknown> {
     return true;
   }
 
+  private async withTimeout<T>(
+    promise: Promise<T>,
+    timeoutMs = 30000 // 30 seconds default
+  ): Promise<T> {
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error(`LLM call timeout after ${timeoutMs}ms`)), timeoutMs);
+    });
+
+    return Promise.race([promise, timeoutPromise]);
+  }
+
+  private async invokeWithRetry<T>(
+    fn: () => Promise<T>,
+    maxRetries = 3,
+    baseDelay = 1000
+  ): Promise<T> {
+    let lastError: Error;
+    
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        return await fn();
+      } catch (error) {
+        lastError = error as Error;
+        
+        // Don't retry if aborted or cancelled
+        if (isAbortedError(error) || error instanceof RequestCancelledError) {
+          throw error;
+        }
+        
+        // If this is the last attempt, throw the error
+        if (attempt === maxRetries) {
+          logger.error(`[${this.modelName}] All ${maxRetries + 1} attempts failed. Last error:`, error);
+          throw error;
+        }
+        
+        // Calculate exponential backoff delay
+        const delay = baseDelay * Math.pow(2, attempt);
+        logger.warning(`[${this.modelName}] Attempt ${attempt + 1} failed, retrying in ${delay}ms:`, error);
+        
+        // Wait before retry
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+    
+    throw lastError!;
+  }
+
   async invoke(inputMessages: BaseMessage[]): Promise<this['ModelOutput']> {
     // Use structured output
     if (this.withStructuredOutput) {
@@ -133,10 +180,15 @@ export abstract class BaseAgent<T extends z.ZodType, M = unknown> {
       });
 
       try {
-        logger.debug(`[${this.modelName}] Invoking LLM with structured output...`);
-        const response = await structuredLlm.invoke(inputMessages, {
-          signal: this.context.controller.signal,
-          ...this.callOptions,
+        logger.debug(`[${this.modelName}] Invoking LLM with structured output using retry logic...`);
+        
+        const response = await this.invokeWithRetry(async () => {
+          return await this.withTimeout(
+            structuredLlm.invoke(inputMessages, {
+              signal: this.context.controller.signal,
+              ...this.callOptions,
+            })
+          );
         });
 
         logger.debug(`[${this.modelName}] LLM response received:`, {
@@ -165,10 +217,16 @@ export abstract class BaseAgent<T extends z.ZodType, M = unknown> {
     logger.debug(`[${this.modelName}] Using manual JSON extraction fallback method`);
     const convertedInputMessages = convertInputMessages(inputMessages, this.modelName);
 
+    let response: any;
+    
     try {
-      const response = await this.chatLLM.invoke(convertedInputMessages, {
-        signal: this.context.controller.signal,
-        ...this.callOptions,
+      response = await this.invokeWithRetry(async () => {
+        return await this.withTimeout(
+          this.chatLLM.invoke(convertedInputMessages, {
+            signal: this.context.controller.signal,
+            ...this.callOptions,
+          })
+        );
       });
 
       if (typeof response.content === 'string') {
@@ -189,7 +247,8 @@ export abstract class BaseAgent<T extends z.ZodType, M = unknown> {
       logger.error(`[${this.modelName}] LLM call failed in manual extraction mode:`, error);
       throw error;
     }
-    const errorMessage = `Failed to parse response: ${response}`;
+    
+    const errorMessage = `Failed to parse response: ${JSON.stringify(response).substring(0, 200)}`;
     logger.error(errorMessage);
     throw new Error('Could not parse response');
   }

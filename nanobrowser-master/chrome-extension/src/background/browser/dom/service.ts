@@ -119,7 +119,10 @@ async function _buildDomTree(
     return [elementTree, new Map<number, DOMElementNode>()];
   }
 
-  const results = await chrome.scripting.executeScript({
+  // Add timeout protection to prevent DOM building hangs
+  const DOM_BUILD_TIMEOUT = 10000; // 10 seconds maximum
+  
+  const domBuildPromise = chrome.scripting.executeScript({
     target: { tabId },
     func: args => {
       // Access buildDomTree from the window context of the target page
@@ -135,11 +138,41 @@ async function _buildDomTree(
     ],
   });
 
-  // First cast to unknown, then to BuildDomTreeResult
-  const evalPage = results[0]?.result as unknown as BuildDomTreeResult;
-  if (!evalPage || !evalPage.map || !evalPage.rootId) {
-    throw new Error('Failed to build DOM tree: No result returned or invalid structure');
+  const timeoutPromise = new Promise((_, reject) => {
+    setTimeout(() => reject(new Error('DOM build timeout after 10 seconds')), DOM_BUILD_TIMEOUT);
+  });
+
+  let results: chrome.scripting.InjectionResult<unknown>[];
+  let evalPage: BuildDomTreeResult;
+  
+  try {
+    results = await Promise.race([domBuildPromise, timeoutPromise]) as chrome.scripting.InjectionResult<unknown>[];
+    
+    // First cast to unknown, then to BuildDomTreeResult
+    evalPage = results[0]?.result as unknown as BuildDomTreeResult;
+    if (!evalPage || !evalPage.map || !evalPage.rootId) {
+      throw new Error('Failed to build DOM tree: No result returned or invalid structure');
+    }
+  } catch (error) {
+    logger.warning(`DOM build failed or timed out: ${error instanceof Error ? error.message : String(error)}`);
+    logger.info('Falling back to simplified DOM mode');
+    
+    // Fallback: return a minimal but functional DOM tree
+    const fallbackElement = new DOMElementNode({
+      tagName: 'body',
+      xpath: '/html/body',
+      attributes: {},
+      children: [],
+      isVisible: true,
+      isInteractive: false,
+      isTopElement: true,
+      isInViewport: true,
+      parent: null,
+    });
+    
+    return [fallbackElement, new Map<number, DOMElementNode>()];
   }
+
 
   // Log performance metrics in debug mode
   if (debugMode && evalPage.perfMetrics) {

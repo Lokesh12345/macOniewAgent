@@ -189,19 +189,49 @@ export class DOMElementNode extends DOMBaseNode {
     return textParts.join('\n').trim();
   }
 
-  clickableElementsToString(includeAttributes: string[] = []): string {
+  clickableElementsToString(includeAttributes: string[] = [], maxElements: number = 100): string {
     const formattedText: string[] = [];
+    let elementCount = 0;
+
+    const isRelevantElement = (node: DOMElementNode): boolean => {
+      // Always include interactive elements
+      if (node.isInteractive || node.highlightIndex !== null) {
+        return true;
+      }
+      
+      // Include visible elements in viewport
+      if (node.isVisible && node.isInViewport) {
+        return true;
+      }
+      
+      // Skip hidden or irrelevant elements
+      return false;
+    };
 
     const processNode = (node: DOMBaseNode, depth: number): void => {
+      // Stop processing if we've reached the element limit
+      if (elementCount >= maxElements) {
+        return;
+      }
+      
       let nextDepth = depth;
       const depthStr = '\t'.repeat(depth);
 
       if (node instanceof DOMElementNode) {
-        // Add element with highlight_index
-        if (node.highlightIndex !== null) {
+        // Add element with highlight_index, but filter for relevance
+        if (node.highlightIndex !== null && isRelevantElement(node)) {
+          elementCount++;
           nextDepth += 1;
 
-          const text = node.getAllTextTillNextClickableElement();
+          let text = node.getAllTextTillNextClickableElement();
+          
+          // Compress long text content to save tokens
+          if (text.length > 100) {
+            text = text.substring(0, 100) + '...';
+          }
+          
+          // Remove excessive whitespace
+          text = text.replace(/\s+/g, ' ').trim();
           let attributesHtmlStr = '';
 
           if (includeAttributes.length) {
@@ -281,6 +311,12 @@ export class DOMElementNode extends DOMBaseNode {
     };
 
     processNode(this, 0);
+    
+    // Add warning if we hit the element limit
+    if (elementCount >= maxElements) {
+      formattedText.push(`\n[WARNING: Element limit of ${maxElements} reached. Page may have more elements not shown.]`);
+    }
+    
     return formattedText.join('\n');
   }
 

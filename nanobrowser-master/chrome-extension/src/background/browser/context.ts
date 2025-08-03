@@ -316,6 +316,187 @@ export default class BrowserContext {
     return tabInfos;
   }
 
+  /**
+   * Dynamic heuristic to detect if a tab appears to be logged in
+   */
+  private async isTabLoggedIn(tab: chrome.tabs.Tab): Promise<boolean> {
+    if (!tab.url || !tab.title) return false;
+    
+    const urlLower = tab.url.toLowerCase();
+    const titleLower = tab.title.toLowerCase();
+    
+    // Universal login page indicators
+    const loginUrlPatterns = [
+      '/login', '/signin', '/sign-in', '/auth', '/authenticate',
+      '/account/login', '/user/login', '/session/new'
+    ];
+    
+    const loginTitlePatterns = [
+      'sign in', 'log in', 'login', 'authentication',
+      'welcome back', 'enter password', 'create account'
+    ];
+    
+    // Check if URL contains any login pattern
+    const hasLoginUrl = loginUrlPatterns.some(pattern => urlLower.includes(pattern));
+    
+    // Check if title contains any login pattern
+    const hasLoginTitle = loginTitlePatterns.some(pattern => titleLower.includes(pattern));
+    
+    // If either URL or title indicates login page, user is NOT logged in
+    return !hasLoginUrl && !hasLoginTitle;
+  }
+
+  /**
+   * Find existing tab that matches the task requirements using pattern matching
+   * @param taskDescription - Description of what we want to do
+   * @param preferredUrl - URL we want to visit (optional)
+   */
+  public async findReusableTab(taskDescription: string, preferredUrl?: string): Promise<number | null> {
+    const tabs = await chrome.tabs.query({});
+    const taskLower = taskDescription.toLowerCase();
+    
+    // Direct URL match has highest priority
+    if (preferredUrl) {
+      for (const tab of tabs) {
+        if (tab.url && tab.url.includes(preferredUrl) && tab.id) {
+          logger.info(`Found exact URL match for ${preferredUrl}: tab ${tab.id}`);
+          return tab.id;
+        }
+      }
+    }
+    
+    // Extract key concepts from task description
+    const taskPatterns = {
+      email: /\b(email|mail|compose|inbox|send|reply)\b/i,
+      search: /\b(search|find|look\s+for|look\s+up|query|google)\b/i,
+      shopping: /\b(buy|shop|purchase|order|cart|product|price)\b/i,
+      development: /\b(code|repository|repo|commit|pull|branch|develop|program)\b/i,
+      social: /\b(social|profile|network|connect|follow|share|post)\b/i,
+      video: /\b(video|watch|play|stream|youtube|vimeo)\b/i,
+      news: /\b(news|article|read|blog|story|headline)\b/i,
+      document: /\b(doc|document|write|edit|sheet|slide)\b/i
+    };
+    
+    // Identify task type
+    let taskType: string | null = null;
+    for (const [type, pattern] of Object.entries(taskPatterns)) {
+      if (pattern.test(taskLower)) {
+        taskType = type;
+        break;
+      }
+    }
+    
+    // Smart matching based on task type and page characteristics
+    for (const tab of tabs) {
+      if (!tab.id || !tab.url || !tab.title) continue;
+      
+      const urlLower = tab.url.toLowerCase();
+      const titleLower = tab.title.toLowerCase();
+      const pageCombined = urlLower + ' ' + titleLower;
+      
+      // Match based on task type
+      switch (taskType) {
+        case 'email':
+          if (/mail|email|inbox|compose/i.test(pageCombined)) {
+            const isLoggedIn = await this.isTabLoggedIn(tab);
+            if (isLoggedIn) {
+              logger.info(`Found email service tab for email task: tab ${tab.id}`);
+              return tab.id;
+            }
+          }
+          break;
+          
+        case 'search':
+          if (/search|query|\?q=|&q=/i.test(urlLower)) {
+            logger.info(`Found search page for search task: tab ${tab.id}`);
+            return tab.id;
+          }
+          break;
+          
+        case 'shopping':
+          if (/shop|store|product|cart|ecommerce/i.test(pageCombined)) {
+            const isLoggedIn = await this.isTabLoggedIn(tab);
+            if (isLoggedIn) {
+              logger.info(`Found shopping site for shopping task: tab ${tab.id}`);
+              return tab.id;
+            }
+          }
+          break;
+          
+        case 'development':
+          if (/github|gitlab|bitbucket|code|repository/i.test(pageCombined)) {
+            logger.info(`Found development platform for coding task: tab ${tab.id}`);
+            return tab.id;
+          }
+          break;
+          
+        case 'social':
+          if (/social|profile|network|feed/i.test(pageCombined)) {
+            logger.info(`Found social platform for social task: tab ${tab.id}`);
+            return tab.id;
+          }
+          break;
+          
+        case 'video':
+          if (/video|watch|youtube|vimeo|stream/i.test(pageCombined)) {
+            logger.info(`Found video platform for video task: tab ${tab.id}`);
+            return tab.id;
+          }
+          break;
+          
+        case 'document':
+          if (/docs|sheets|slides|document|editor/i.test(pageCombined)) {
+            logger.info(`Found document editor for document task: tab ${tab.id}`);
+            return tab.id;
+          }
+          break;
+      }
+      
+      // Generic domain matching if task mentions specific domain
+      const domainMatch = taskLower.match(/\b(\w+\.(?:com|org|net|io|co|edu))\b/);
+      if (domainMatch && urlLower.includes(domainMatch[1])) {
+        logger.info(`Found tab matching domain ${domainMatch[1]}: tab ${tab.id}`);
+        return tab.id;
+      }
+    }
+    
+    logger.info('No reusable tab found for task');
+    return null;
+  }
+
+  /**
+   * Navigate to URL in existing tab (helper method for tab reuse)
+   */
+  private async navigateToUrl(tabId: number, url: string): Promise<Page> {
+    await chrome.tabs.update(tabId, { url, active: true });
+    await this.waitForTabEvents(tabId);
+    
+    // Get updated tab and create/attach page
+    const updatedTab = await chrome.tabs.get(tabId);
+    const page = await this._getOrCreatePage(updatedTab, true);
+    await this.attachPage(page);
+    this._currentTabId = tabId;
+    
+    return page;
+  }
+
+  /**
+   * Intelligent tab opening that reuses existing tabs when beneficial
+   */
+  public async smartOpenTab(url: string, taskDescription?: string): Promise<Page> {
+    // Check if we can reuse an existing tab
+    const reusableTabId = await this.findReusableTab(taskDescription || '', url);
+    
+    if (reusableTabId) {
+      logger.info(`Reusing existing tab ${reusableTabId} instead of creating new one`);
+      return await this.navigateToUrl(reusableTabId, url);
+    }
+    
+    // No suitable tab found, create new one
+    logger.info(`Creating new tab for ${url}`);
+    return await this.openTab(url);
+  }
+
   public async getCachedState(useVision = false, cacheClickableElementsHashes = false): Promise<BrowserState> {
     const currentPage = await this.getCurrentPage();
 

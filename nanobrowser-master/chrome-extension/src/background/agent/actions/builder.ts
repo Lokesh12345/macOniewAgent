@@ -21,6 +21,9 @@ import {
   nextPageActionSchema,
   scrollToTopActionSchema,
   scrollToBottomActionSchema,
+  refreshPageActionSchema,
+  dismissModalActionSchema,
+  uploadFileActionSchema,
 } from './schemas';
 import { z } from 'zod';
 import { createLogger } from '@src/background/log';
@@ -181,6 +184,16 @@ export class ActionBuilder {
       const intent = input.intent || `Navigating to ${input.url}`;
       this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_START, intent);
 
+      // Validate URL to prevent restricted protocols
+      if (input.url.startsWith('chrome://') || input.url.startsWith('chrome-extension://') || input.url.startsWith('edge://') || input.url.startsWith('about:')) {
+        const errorMsg = `Cannot navigate to restricted URL: ${input.url}. Please use a regular web URL (http:// or https://).`;
+        this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_FAIL, errorMsg);
+        return new ActionResult({
+          error: errorMsg,
+          includeInMemory: true,
+        });
+      }
+
       await this.context.browserContext.navigateTo(input.url);
       const msg2 = `Navigated to ${input.url}`;
       this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_OK, msg2);
@@ -312,8 +325,11 @@ export class ActionBuilder {
     const openTab = new Action(async (input: z.infer<typeof openTabActionSchema.schema>) => {
       const intent = input.intent || `Opening ${input.url} in new tab`;
       this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_START, intent);
-      await this.context.browserContext.openTab(input.url);
-      const msg = `Opened ${input.url} in new tab`;
+      
+      // Use smart tab management to reuse existing tabs when beneficial
+      await this.context.browserContext.smartOpenTab(input.url, intent);
+      
+      const msg = `Opened ${input.url} (with intelligent tab reuse)`;
       this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_OK, msg);
       return new ActionResult({ extractedContent: msg, includeInMemory: true });
     }, openTabActionSchema);
@@ -706,6 +722,100 @@ export class ActionBuilder {
       true,
     );
     actions.push(selectDropdownOption);
+
+    // Refresh Page Action
+    const refreshPage = new Action(async (input: z.infer<typeof refreshPageActionSchema.schema>) => {
+      const intent = input.intent || 'Refreshing current page';
+      this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_START, intent);
+      
+      const page = await this.context.browserContext.getCurrentPage();
+      await page.refreshPage();
+      const msg = 'Page refreshed successfully';
+      this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_OK, msg);
+      return new ActionResult({ extractedContent: msg, includeInMemory: true });
+    }, refreshPageActionSchema);
+    actions.push(refreshPage);
+
+    // Dismiss Modal Action
+    const dismissModal = new Action(async (input: z.infer<typeof dismissModalActionSchema.schema>) => {
+      const intent = input.intent || `Dismissing modal using ${input.method}`;
+      this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_START, intent);
+      
+      const page = await this.context.browserContext.getCurrentPage();
+      
+      if (input.method === 'escape') {
+        // Try pressing Escape key to dismiss modal
+        await page.sendKeys('Escape');
+        const msg = 'Pressed Escape key to dismiss modal';
+        this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_OK, msg);
+        return new ActionResult({ extractedContent: msg, includeInMemory: true });
+      } else {
+        // Try to find and click close button
+        // This is a simplified approach - could be enhanced to look for common close button patterns
+        try {
+          const state = await page.getState();
+          // Look for common close button text/aria-labels
+          const closeButtonSelectors = ['×', 'Close', 'X', 'close', 'dismiss', 'Cancel'];
+          
+          for (const closeText of closeButtonSelectors) {
+            // Find elements containing close text
+            const elements = state?.selectorMap;
+            if (elements) {
+              for (const [index, element] of elements.entries()) {
+                const elementText = element.getAllTextTillNextClickableElement(1).toLowerCase();
+                if (elementText.includes(closeText.toLowerCase()) || 
+                    element.attributes?.['aria-label']?.toLowerCase().includes(closeText.toLowerCase())) {
+                  await page.clickElementNode(false, element);
+                  const msg = `Found and clicked close button: "${elementText}"`;
+                  this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_OK, msg);
+                  return new ActionResult({ extractedContent: msg, includeInMemory: true });
+                }
+              }
+            }
+          }
+          
+          // Fallback to Escape if no close button found
+          await page.sendKeys('Escape');
+          const msg = 'No close button found, tried Escape key instead';
+          this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_OK, msg);
+          return new ActionResult({ extractedContent: msg, includeInMemory: true });
+        } catch (error) {
+          const msg = `Failed to find close button: ${error instanceof Error ? error.message : String(error)}`;
+          this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_FAIL, msg);
+          return new ActionResult({ error: msg, includeInMemory: true });
+        }
+      }
+    }, dismissModalActionSchema);
+    actions.push(dismissModal);
+
+    // Upload File Action (simplified - real file upload needs user interaction)
+    const uploadFile = new Action(async (input: z.infer<typeof uploadFileActionSchema.schema>) => {
+      const intent = input.intent || `Simulating file upload: ${input.filename}`;
+      this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_START, intent);
+      
+      const page = await this.context.browserContext.getCurrentPage();
+      const state = await page.getState();
+      
+      const elementNode = state?.selectorMap.get(input.index);
+      if (!elementNode) {
+        throw new Error(`Element with index ${input.index} does not exist - retry or use alternative actions`);
+      }
+      
+      // Check if it's actually a file input
+      if (elementNode.tagName?.toLowerCase() !== 'input' || 
+          elementNode.attributes?.type?.toLowerCase() !== 'file') {
+        const msg = `Element with index ${input.index} is not a file input (found: ${elementNode.tagName})`;
+        this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_FAIL, msg);
+        return new ActionResult({ error: msg, includeInMemory: true });
+      }
+      
+      // For now, we can only simulate by providing feedback about the file input
+      const msg = `Found file input for uploading "${input.filename}" - Note: Actual file upload requires user interaction with browser security. Consider using alternative approaches or inform user of file upload requirement.`;
+      logger.info(msg);
+      this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_OK, msg);
+      return new ActionResult({ extractedContent: msg, includeInMemory: true });
+    }, uploadFileActionSchema, true);
+    actions.push(uploadFile);
 
     return actions;
   }
