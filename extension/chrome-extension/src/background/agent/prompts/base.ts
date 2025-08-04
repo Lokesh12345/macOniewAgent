@@ -30,6 +30,17 @@ abstract class BasePrompt {
     const browserState = await context.browserContext.getState(context.options.useVision);
     const rawElementsText = browserState.elementTree.clickableElementsToString(context.options.includeAttributes);
 
+    // 🌐 DOM STATE LOGGING: What LLM sees
+    logger.info('🌐 DOM STATE TO LLM - Total interactive elements:', (rawElementsText.match(/^\[/gm) || []).length);
+    logger.info('🌐 DOM STATE TO LLM - Contains subject field:', rawElementsText.includes('subject') || rawElementsText.includes('Subject'));
+    logger.info('🌐 DOM STATE TO LLM - Contains compose elements:', rawElementsText.includes('compose') || rawElementsText.includes('Compose'));
+    logger.info('🌐 DOM STATE TO LLM - Contains email/message fields:', rawElementsText.includes('email') || rawElementsText.includes('message'));
+    
+    // Log first 1000 chars of DOM elements for debugging
+    if (rawElementsText.length > 0) {
+      logger.info('🌐 DOM STATE PREVIEW (first 1000 chars):', rawElementsText.substring(0, 1000));
+    }
+
     let formattedElementsText = '';
     if (rawElementsText !== '') {
       const scrollInfo = `[Scroll info of current page] window.scrollY: ${browserState.scrollY}, document.body.scrollHeight: ${browserState.scrollHeight}, window.visualViewport.height: ${browserState.visualViewportHeight}, visual viewport height as percentage of scrollable distance: ${Math.round((browserState.visualViewportHeight / (browserState.scrollHeight - browserState.visualViewportHeight)) * 100)}%\n`;
@@ -79,6 +90,11 @@ ${formattedElementsText}
 ${stepInfoDescription}
 ${actionResultsDescription}
 `;
+
+    // 📝 FINAL MESSAGE LOGGING: Complete message to LLM
+    logger.info('📝 FINAL USER MESSAGE TO LLM (first 2000 chars):', stateDescription.substring(0, 2000));
+    logger.info('📝 MESSAGE CONTAINS VISION:', !!(browserState.screenshot && context.options.useVision));
+    logger.info('📝 MESSAGE LENGTH:', stateDescription.length);
 
     if (browserState.screenshot && context.options.useVision) {
       return new HumanMessage({

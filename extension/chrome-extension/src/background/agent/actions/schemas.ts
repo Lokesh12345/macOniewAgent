@@ -43,24 +43,50 @@ export const goBackActionSchema: ActionSchema = {
   }),
 };
 
-export const clickElementActionSchema: ActionSchema = {
-  name: 'click_element',
-  description: 'Click element by index',
+export const goForwardActionSchema: ActionSchema = {
+  name: 'go_forward',
+  description: 'Go forward to the next page in browser history',
   schema: z.object({
     intent: z.string().default('').describe('purpose of this action'),
-    index: z.number().int().describe('index of the element'),
+  }),
+};
+
+export const refreshActionSchema: ActionSchema = {
+  name: 'refresh',
+  description: 'Refresh/reload the current page',
+  schema: z.object({
+    intent: z.string().default('').describe('purpose of this action'),
+  }),
+};
+
+export const clickElementActionSchema: ActionSchema = {
+  name: 'click_element',
+  description: 'Click element with semantic targeting preferred over index. For buttons/links, provide text or aria-label to handle dynamic DOM changes reliably.',
+  schema: z.object({
+    intent: z.string().default('').describe('purpose of this action (e.g., "Click compose button", "Submit form")'),
+    index: z.number().int().optional().describe('index of the element (fallback only - DOM indices can change)'),
     xpath: z.string().nullable().optional().describe('xpath of the element'),
+    // SEMANTIC TARGETING (strongly recommended for dynamic sites)
+    text: z.string().optional().describe('button/link text for reliable targeting (e.g., "Compose", "Send", "Submit")'),
+    aria: z.string().optional().describe('aria-label or accessible name for reliable targeting'),
+    selector: z.string().optional().describe('CSS selector as fallback (e.g., "button[type=submit]")'),
+    attributes: z.record(z.string()).optional().describe('attribute-value pairs for matching (e.g., {"role": "button", "data-action": "compose"})'),
   }),
 };
 
 export const inputTextActionSchema: ActionSchema = {
   name: 'input_text',
-  description: 'Input text into an interactive input element',
+  description: 'Input text into an interactive input element. For form fields, ALWAYS provide semantic attributes (aria, placeholder) to handle dynamic DOM changes reliably. Index is used as fallback only.',
   schema: z.object({
-    intent: z.string().default('').describe('purpose of this action'),
-    index: z.number().int().describe('index of the element'),
+    intent: z.string().default('').describe('purpose of this action (e.g., "Fill subject field", "Enter recipient email")'),
+    index: z.number().int().optional().describe('index of the element (fallback only - DOM indices can change)'),
     text: z.string().describe('text to input'),
     xpath: z.string().nullable().optional().describe('xpath of the element'),
+    // SEMANTIC TARGETING (strongly recommended for dynamic sites like Gmail)
+    aria: z.string().optional().describe('aria-label or accessible name for reliable targeting (e.g., "Subject", "Message Body", "To recipients")'),
+    placeholder: z.string().optional().describe('placeholder text for reliable targeting (e.g., "Subject", "Recipients")'),
+    selector: z.string().optional().describe('CSS selector as fallback (e.g., "input[name=subject]")'),
+    attributes: z.record(z.string()).optional().describe('attribute-value pairs for matching (e.g., {"name": "subject", "type": "text"})'),
   }),
 };
 

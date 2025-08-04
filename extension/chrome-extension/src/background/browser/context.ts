@@ -9,12 +9,17 @@ import {
 import Page, { build_initial_state } from './page';
 import { createLogger } from '@src/background/log';
 import { isUrlAllowed } from './util';
+import { performanceManager } from './performance';
+import { performanceMonitoring } from './monitoring';
+import { workflowSystem } from '../agent/workflow';
+import { taskMemoryManager } from './navigation/taskMemory';
 
 const logger = createLogger('BrowserContext');
 export default class BrowserContext {
   private _config: BrowserContextConfig;
   private _currentTabId: number | null = null;
   private _attachedPages: Map<number, Page> = new Map();
+  private _currentTaskId: string | null = null;
 
   constructor(config: Partial<BrowserContextConfig>) {
     this._config = { ...DEFAULT_BROWSER_CONTEXT_CONFIG, ...config };
@@ -31,6 +36,17 @@ export default class BrowserContext {
   public updateCurrentTabId(tabId: number): void {
     // only update tab id, but don't attach it.
     this._currentTabId = tabId;
+  }
+
+  public setCurrentTaskId(taskId: string, userIntent?: string): void {
+    this._currentTaskId = taskId;
+    if (userIntent && taskId) {
+      taskMemoryManager.getOrCreateMemory(taskId, userIntent);
+    }
+  }
+
+  public getCurrentTaskId(): string | null {
+    return this._currentTaskId;
   }
 
   private async _getOrCreatePage(tab: chrome.tabs.Tab, forceUpdate = false): Promise<Page> {
@@ -72,6 +88,12 @@ export default class BrowserContext {
 
     if (await page.attachPuppeteer()) {
       logger.info('attachPage', page.tabId, 'attached');
+      
+      // Set task ID for context preservation
+      if (this._currentTaskId) {
+        page.setTaskId(this._currentTaskId);
+      }
+      
       // add page to managed pages
       this._attachedPages.set(page.tabId, page);
       return true;
@@ -230,62 +252,111 @@ export default class BrowserContext {
   }
 
   public async navigateTo(url: string): Promise<void> {
-    if (!isUrlAllowed(url, this._config.allowedUrls, this._config.deniedUrls)) {
-      throw new URLNotAllowedError(`URL: ${url} is not allowed`);
-    }
+    return performanceMonitoring.timeFunction('browser.navigation', async () => {
+      if (!isUrlAllowed(url, this._config.allowedUrls, this._config.deniedUrls)) {
+        performanceMonitoring.recordMetric('browser.navigation.blocked', 1, 'counter', { url });
+        throw new URLNotAllowedError(`URL: ${url} is not allowed`);
+      }
 
-    const page = await this.getCurrentPage();
-    if (!page) {
-      await this.openTab(url);
-      return;
-    }
-    // if page is attached, use puppeteer to navigate to the url
-    if (page.attached) {
-      await page.navigateTo(url);
-      return;
-    }
-    //  Use chrome.tabs.update only if the page is not attached
-    const tabId = page.tabId;
-    // Update tab and wait for events
-    await chrome.tabs.update(tabId, { url, active: true });
-    await this.waitForTabEvents(tabId);
+      const page = await this.getCurrentPage();
+      if (!page) {
+        await this.openTab(url);
+        return;
+      }
 
-    // Reattach the page after navigation completes
-    const updatedPage = await this._getOrCreatePage(await chrome.tabs.get(tabId), true);
-    await this.attachPage(updatedPage);
-    this._currentTabId = tabId;
+      // Preserve context before navigation
+      const currentUrl = page.state?.url;
+      const taskId = this._currentTaskId || 'default';
+      
+      if (currentUrl && currentUrl !== url) {
+        taskMemoryManager.preserveContextForNavigation(taskId, currentUrl, url);
+      }
+
+      // Smart cache invalidation based on navigation type
+      const navigationType = taskMemoryManager.analyzeNavigation(currentUrl || '', url);
+      if (navigationType !== 'same_page') {
+        performanceManager.invalidateTab(page.tabId);
+      }
+
+      // if page is attached, use puppeteer to navigate to the url
+      if (page.attached) {
+        await page.navigateTo(url);
+        
+        // Warm up performance systems for the new URL
+        await performanceManager.warmUp(page.tabId, url);
+        
+        performanceMonitoring.recordMetric('browser.navigation.success', 1, 'counter', { 
+          type: 'attached', 
+          url: new URL(url).hostname 
+        });
+        return;
+      }
+      //  Use chrome.tabs.update only if the page is not attached
+      const tabId = page.tabId;
+      // Update tab and wait for events
+      await chrome.tabs.update(tabId, { url, active: true });
+      await this.waitForTabEvents(tabId);
+
+      // Reattach the page after navigation completes
+      const updatedPage = await this._getOrCreatePage(await chrome.tabs.get(tabId), true);
+      await this.attachPage(updatedPage);
+      this._currentTabId = tabId;
+
+      // Warm up performance systems for the new URL
+      await performanceManager.warmUp(tabId, url);
+      
+      performanceMonitoring.recordMetric('browser.navigation.success', 1, 'counter', { 
+        type: 'detached', 
+        url: new URL(url).hostname 
+      });
+    }, { operation: 'navigate' });
   }
 
   public async openTab(url: string): Promise<Page> {
-    if (!isUrlAllowed(url, this._config.allowedUrls, this._config.deniedUrls)) {
-      throw new URLNotAllowedError(`Open tab failed. URL: ${url} is not allowed`);
-    }
+    return performanceMonitoring.timeFunction('browser.tab.open', async () => {
+      if (!isUrlAllowed(url, this._config.allowedUrls, this._config.deniedUrls)) {
+        performanceMonitoring.recordMetric('browser.tab.blocked', 1, 'counter', { url });
+        throw new URLNotAllowedError(`Open tab failed. URL: ${url} is not allowed`);
+      }
 
-    // Create the new tab
-    const tab = await chrome.tabs.create({ url, active: true });
-    if (!tab.id) {
-      throw new Error('No tab ID available');
-    }
-    // Wait for tab events
-    await this.waitForTabEvents(tab.id);
+      // Create the new tab
+      const tab = await chrome.tabs.create({ url, active: true });
+      if (!tab.id) {
+        throw new Error('No tab ID available');
+      }
+      
+      performanceMonitoring.recordMetric('browser.tabs.opened', 1, 'counter');
+      
+      // Wait for tab events
+      await this.waitForTabEvents(tab.id);
 
-    // Get updated tab information
-    const updatedTab = await chrome.tabs.get(tab.id);
-    // Create and attach the page after tab is fully loaded and activated
-    const page = await this._getOrCreatePage(updatedTab);
-    await this.attachPage(page);
-    this._currentTabId = tab.id;
+      // Get updated tab information
+      const updatedTab = await chrome.tabs.get(tab.id);
+      // Create and attach the page after tab is fully loaded and activated
+      const page = await this._getOrCreatePage(updatedTab);
+      await this.attachPage(page);
+      this._currentTabId = tab.id;
 
-    return page;
+      performanceMonitoring.recordMetric('browser.active.tabs', 1, 'gauge');
+      return page;
+    }, { operation: 'openTab' });
   }
 
   public async closeTab(tabId: number): Promise<void> {
-    await this.detachPage(tabId);
-    await chrome.tabs.remove(tabId);
-    // update current tab id if needed
-    if (this._currentTabId === tabId) {
-      this._currentTabId = null;
-    }
+    return performanceMonitoring.timeFunction('browser.tab.close', async () => {
+      // Invalidate performance caches before closing
+      performanceManager.invalidateTab(tabId);
+      
+      await this.detachPage(tabId);
+      await chrome.tabs.remove(tabId);
+      
+      performanceMonitoring.recordMetric('browser.tabs.closed', 1, 'counter');
+      
+      // update current tab id if needed
+      if (this._currentTabId === tabId) {
+        this._currentTabId = null;
+      }
+    }, { operation: 'closeTab', tabId: tabId.toString() });
   }
 
   /**
@@ -317,27 +388,84 @@ export default class BrowserContext {
   }
 
   public async getCachedState(useVision = false, cacheClickableElementsHashes = false): Promise<BrowserState> {
-    const currentPage = await this.getCurrentPage();
+    return performanceMonitoring.timeFunction('browser.state.cached', async () => {
+      const currentPage = await this.getCurrentPage();
 
-    let pageState = !currentPage ? build_initial_state() : currentPage.getCachedState();
-    if (!pageState) {
-      pageState = await currentPage.getState(useVision, cacheClickableElementsHashes);
-    }
+      if (!currentPage) {
+        const tabInfos = await this.getTabInfos();
+        return {
+          ...build_initial_state(),
+          tabs: tabInfos,
+        };
+      }
 
-    const tabInfos = await this.getTabInfos();
-    const browserState: BrowserState = {
-      ...pageState,
-      tabs: tabInfos,
-    };
-    return browserState;
+      // Try performance-optimized cache first
+      let pageState = await performanceManager.getCachedState(
+        currentPage.tabId,
+        currentPage.url || '',
+        false,
+        useVision
+      );
+
+      let cacheHit = !!pageState;
+
+      // Fallback to page's own cache
+      if (!pageState) {
+        pageState = currentPage.getCachedState();
+        cacheHit = !!pageState;
+      }
+
+      // Generate state if no cache available
+      if (!pageState) {
+        pageState = await currentPage.getState(useVision, cacheClickableElementsHashes);
+        
+        // Cache the generated state for future use
+        if (pageState && currentPage.url) {
+          performanceManager.cacheState(currentPage.tabId, currentPage.url, pageState, {
+            ttl: 30000 // 30 second TTL for cached states
+          });
+        }
+        cacheHit = false;
+      }
+
+      // Record cache performance
+      performanceMonitoring.recordMetric(
+        cacheHit ? 'performance.dom.cache.hits' : 'performance.dom.cache.misses', 
+        1, 
+        'counter',
+        { useVision: useVision.toString() }
+      );
+
+      const tabInfos = await this.getTabInfos();
+      const browserState: BrowserState = {
+        ...pageState,
+        tabs: tabInfos,
+      };
+      return browserState;
+    }, { operation: 'getCachedState', useVision: useVision.toString() });
   }
 
   public async getState(useVision = false, cacheClickableElementsHashes = false): Promise<BrowserState> {
     const currentPage = await this.getCurrentPage();
 
-    const pageState = !currentPage
-      ? build_initial_state()
-      : await currentPage.getState(useVision, cacheClickableElementsHashes);
+    if (!currentPage) {
+      const tabInfos = await this.getTabInfos();
+      return {
+        ...build_initial_state(),
+        tabs: tabInfos,
+      };
+    }
+
+    // Generate fresh state
+    const pageState = await currentPage.getState(useVision, cacheClickableElementsHashes);
+    
+    // Cache the fresh state for future getCachedState calls
+    if (pageState && currentPage.url) {
+      performanceManager.cacheState(currentPage.tabId, currentPage.url, pageState, {
+        ttl: 30000 // 30 second TTL for fresh states
+      });
+    }
+
     const tabInfos = await this.getTabInfos();
     const browserState: BrowserState = {
       ...pageState,

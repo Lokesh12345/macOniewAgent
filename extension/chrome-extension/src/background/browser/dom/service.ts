@@ -5,6 +5,47 @@ import type { ViewportInfo } from './history/view';
 
 const logger = createLogger('DOMService');
 
+/**
+ * Ensure buildDomTree script is injected and available
+ */
+async function ensureBuildDomTreeScript(tabId: number): Promise<void> {
+  try {
+    // Check if buildDomTree is available
+    const isAvailable = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => typeof window.buildDomTree === 'function',
+    });
+
+    if (isAvailable[0]?.result) {
+      return; // Already available
+    }
+
+    // Inject the script
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ['buildDomTree.js'],
+    });
+
+    // Wait a bit for script to load
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    // Verify it's now available
+    const isNowAvailable = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => typeof window.buildDomTree === 'function',
+    });
+
+    if (!isNowAvailable[0]?.result) {
+      throw new Error('buildDomTree script injection failed');
+    }
+
+    logger.debug(`buildDomTree script ensured for tab ${tabId}`);
+  } catch (error) {
+    logger.error(`Failed to ensure buildDomTree script for tab ${tabId}:`, error);
+    throw error;
+  }
+}
+
 export interface ReadabilityResult {
   title: string;
   content: string;
@@ -119,6 +160,9 @@ async function _buildDomTree(
     return [elementTree, new Map<number, DOMElementNode>()];
   }
 
+  // Ensure buildDomTree script is available before attempting to build DOM
+  await ensureBuildDomTreeScript(tabId);
+  
   const results = await chrome.scripting.executeScript({
     target: { tabId },
     func: args => {

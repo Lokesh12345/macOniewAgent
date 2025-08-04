@@ -23,6 +23,7 @@ import { URLNotAllowedError } from '../browser/views';
 import { chatHistoryStore } from '@extension/storage/lib/chat';
 import type { AgentStepHistory } from './history';
 import type { GeneralSettingsConfig } from '@extension/storage';
+import { agentCoordination } from './coordination';
 
 const logger = createLogger('Executor');
 
@@ -44,6 +45,7 @@ export class Executor {
   private readonly validatorPrompt: ValidatorPrompt;
   private readonly generalSettings: GeneralSettingsConfig | undefined;
   private tasks: string[] = [];
+  private coordinationEnabled: boolean = true;
   constructor(
     task: string,
     taskId: string,
@@ -94,6 +96,24 @@ export class Executor {
     });
 
     this.context = context;
+    
+    // Set task ID in browser context for navigation memory
+    browserContext.setCurrentTaskId(taskId, task);
+    
+    // Initialize agent coordination
+    agentCoordination.initialize();
+    
+    // Analyze task complexity and configure agents
+    if (this.coordinationEnabled) {
+      const analysis = agentCoordination.analyzeTask(task);
+      
+      // Apply recommended configuration
+      if (analysis.configuration) {
+        this.context.options = { ...this.context.options, ...analysis.configuration };
+        logger.info('Applied coordination recommendations:', analysis);
+      }
+    }
+    
     // Initialize message history
     this.context.messageManager.initTaskMessages(this.navigatorPrompt.getSystemMessage(), task);
   }
@@ -147,6 +167,28 @@ export class Executor {
           break;
         }
 
+        // Update shared context if coordination is enabled
+        if (this.coordinationEnabled) {
+          await agentCoordination.getSharedContext(this.context);
+          
+          // Check if message compression is needed
+          if (agentCoordination.shouldCompressMessages(this.context)) {
+            const messages = this.context.messageManager.getMessages();
+            const compressed = await agentCoordination.compressMessageHistory(
+              messages,
+              this.context.options.maxInputTokens * 0.8, // Target 80% of max tokens
+              5 // Preserve last 5 messages
+            );
+            
+            // Update message manager with compressed history
+            if (compressed.length < messages.length) {
+              logger.info(`Compressed message history: ${messages.length} → ${compressed.length} messages`);
+              // Note: This would require adding a method to MessageManager to replace messages
+              // For now, we'll just log the compression
+            }
+          }
+        }
+
         // Run planner if configured
         if (this.planner && (context.nSteps % context.options.planningInterval === 0 || validatorFailed)) {
           validatorFailed = false;
@@ -187,6 +229,20 @@ export class Executor {
 
             if (!webTask && planOutput.result.done) {
               break;
+            }
+            
+            // Update shared context with planner results
+            if (this.coordinationEnabled) {
+              await agentCoordination.updateSharedContext(
+                this.context,
+                'planner',
+                {
+                  currentGoal: planOutput.result.web_task || planOutput.result.next_steps?.[0],
+                  completedGoals: [], // Would need to track this
+                  remainingSteps: planOutput.result.next_steps,
+                  strategy: planOutput.result.observation
+                }
+              );
             }
           }
         }
@@ -262,6 +318,20 @@ export class Executor {
         throw new Error(navOutput.error);
       }
       context.consecutiveFailures = 0;
+      
+      // Update shared context with navigator results
+      if (this.coordinationEnabled) {
+        await agentCoordination.updateSharedContext(
+          this.context,
+          'navigator',
+          {
+            focusArea: 'interaction', // Could be determined from action types
+            interactionMode: context.consecutiveFailures > 0 ? 'exploratory' : 'precise',
+            elementFilters: [] // Could be populated based on current focus
+          }
+        );
+      }
+      
       if (navOutput.result?.done) {
         return true;
       }

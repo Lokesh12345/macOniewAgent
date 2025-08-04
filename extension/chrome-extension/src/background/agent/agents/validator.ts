@@ -70,7 +70,26 @@ export class ValidatorAgent extends BaseAgent<typeof validatorOutputSchema, Vali
         throw new Error('Failed to validate task result');
       }
 
-      logger.info('validator output', JSON.stringify(modelOutput, null, 2));
+      // 🔍 DETAILED VALIDATOR ANALYSIS
+      logger.info('🔍 VALIDATOR INPUT MESSAGE:', stateMessage.content.substring(0, 500) + '...');
+      logger.info('🔍 VALIDATOR OUTPUT:', JSON.stringify(modelOutput, null, 2));
+      logger.info('🔍 VALIDATOR DECISION:', modelOutput.is_valid ? '✅ TASK COMPLETE' : '❌ TASK INCOMPLETE');
+      logger.info('🔍 VALIDATOR REASONING:', modelOutput.reason);
+      
+      // Enhanced logging for form validation scenarios
+      if (stateMessage.content.includes('subject') || stateMessage.content.includes('email') || stateMessage.content.includes('compose')) {
+        logger.info('🔍 FORM VALIDATION CONTEXT DETECTED');
+        logger.info('🔍 Looking for form field completion in DOM state...');
+        
+        // Extract interactive elements from state message to see what validator sees
+        const interactiveSection = stateMessage.content.split('Interactive Elements')[1];
+        if (interactiveSection) {
+          const subjectFields = interactiveSection.match(/subject|Subject/gi) || [];
+          const bodyFields = interactiveSection.match(/body|message|compose/gi) || [];
+          logger.info('🔍 DOM ELEMENTS - Subject fields found:', subjectFields.length);
+          logger.info('🔍 DOM ELEMENTS - Body/message fields found:', bodyFields.length);
+        }
+      }
 
       if (!modelOutput.is_valid) {
         // need to update the action results so that other agents can see the error

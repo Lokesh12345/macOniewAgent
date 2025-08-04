@@ -3,6 +3,8 @@ import {
   clickElementActionSchema,
   doneActionSchema,
   goBackActionSchema,
+  goForwardActionSchema,
+  refreshActionSchema,
   goToUrlActionSchema,
   inputTextActionSchema,
   openTabActionSchema,
@@ -27,6 +29,9 @@ import { createLogger } from '@src/background/log';
 import { ExecutionState, Actors } from '../event/types';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { wrapUntrustedContent } from '../messages/utils';
+import { EnhancedElementFinder } from './enhancedElementFinder';
+import { IntelligentWaiting } from './intelligentWaiting';
+import { ErrorRecovery } from './errorRecovery';
 
 const logger = createLogger('Action');
 
@@ -207,66 +212,172 @@ export class ActionBuilder {
     }, goBackActionSchema);
     actions.push(goBack);
 
+    const goForward = new Action(async (input: z.infer<typeof goForwardActionSchema.schema>) => {
+      const intent = input.intent || 'Navigating forward';
+      this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_START, intent);
+
+      const page = await this.context.browserContext.getCurrentPage();
+      await page.goForward();
+      const msg = 'Navigated forward';
+      this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_OK, msg);
+      return new ActionResult({
+        extractedContent: msg,
+        includeInMemory: true,
+      });
+    }, goForwardActionSchema);
+    actions.push(goForward);
+
+    const refresh = new Action(async (input: z.infer<typeof refreshActionSchema.schema>) => {
+      const intent = input.intent || 'Refreshing page';
+      this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_START, intent);
+
+      const page = await this.context.browserContext.getCurrentPage();
+      await page.refreshPage();
+      const msg = 'Page refreshed successfully';
+      this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_OK, msg);
+      return new ActionResult({
+        extractedContent: msg,
+        includeInMemory: true,
+      });
+    }, refreshActionSchema);
+    actions.push(refresh);
+
     const wait = new Action(async (input: z.infer<typeof waitActionSchema.schema>) => {
       const seconds = input.seconds || 3;
-      const intent = input.intent || `Waiting for ${seconds} seconds`;
+      const intent = input.intent || `Intelligently waiting up to ${seconds} seconds`;
       this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_START, intent);
-      await new Promise(resolve => setTimeout(resolve, seconds * 1000));
-      const msg = `${seconds} seconds elapsed`;
+      
+      // Use intelligent waiting instead of fixed delay
+      const waitResult = await IntelligentWaiting.waitFor(this.context.browserContext, {
+        preset: 'stable',
+        maxWait: seconds * 1000,
+        minWait: Math.min(500, seconds * 200), // 20% of max wait or 500ms, whichever is smaller
+      });
+
+      const duration = (waitResult.duration / 1000).toFixed(2);
+      const msg = waitResult.success 
+        ? `Wait completed successfully in ${duration}s (conditions: ${waitResult.metConditions.join(', ')})`
+        : `Wait timed out after ${duration}s (unmet: ${waitResult.unmetConditions.join(', ')})`;
+        
+      logger.info('Intelligent wait result:', waitResult);
       this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_OK, msg);
       return new ActionResult({ extractedContent: msg, includeInMemory: true });
     }, waitActionSchema);
     actions.push(wait);
 
-    // Element Interaction Actions
+    // Element Interaction Actions with Error Recovery
     const clickElement = new Action(
       async (input: z.infer<typeof clickElementActionSchema.schema>) => {
         const intent = input.intent || `Click element with index ${input.index}`;
         this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_START, intent);
 
-        const page = await this.context.browserContext.getCurrentPage();
-        const state = await page.getState();
+        // Enhanced element targeting with fallback strategies
+        let targetingStrategy = {
+          index: input.index,
+          xpath: input.xpath,
+          selector: input.selector,
+          text: input.text,
+          aria: input.aria,
+          attributes: input.attributes,
+        };
 
-        const elementNode = state?.selectorMap.get(input.index);
-        if (!elementNode) {
-          throw new Error(`Element with index ${input.index} does not exist - retry or use alternative actions`);
-        }
+        // Create recovery context
+        const recoveryContext = ErrorRecovery.createContext(
+          new Error('Initial setup'), // Will be updated with actual error
+          'click',
+          this.context.browserContext,
+          this.context
+        );
 
-        // Check if element is a file uploader
-        if (page.isFileUploader(elementNode)) {
-          const msg = `Index ${input.index} - has an element which opens file upload dialog. To upload files please use a specific function to upload files`;
-          logger.info(msg);
-          return new ActionResult({
-            extractedContent: msg,
-            includeInMemory: true,
-          });
-        }
+        // Define the click action with error recovery
+        const executeClickAction = async (): Promise<ActionResult> => {
+          const page = await this.context.browserContext.getCurrentPage();
+          const state = await this.context.browserContext.getState();
 
-        try {
+          // 🎯 ENHANCED ELEMENT FINDING: Use semantic attributes first, index as fallback
+          let elementNode = input.index !== undefined ? state.selectorMap.get(input.index) : undefined;
+          
+          // If semantic attributes provided, try enhanced finder first
+          if (input.aria || input.text || input.selector) {
+            logger.info(`🔍 Using enhanced element finder for click: aria="${input.aria}", text="${input.text}", selector="${input.selector}"`);
+            
+            try {
+              const result = await EnhancedElementFinder.findElement({
+                index: input.index,
+                xpath: input.xpath,
+                selector: input.selector,
+                text: input.text,
+                aria: input.aria,
+                attributes: input.attributes,
+              }, state);
+              
+              if (result) {
+                elementNode = result.element;
+                logger.info(`✅ Enhanced finder success: Found element using ${result.strategy} (confidence: ${result.confidence})`);
+              } else {
+                logger.info(`⚠️ Enhanced finder failed, falling back to index ${input.index}`);
+              }
+            } catch (error) {
+              logger.info(`⚠️ Enhanced finder error: ${error}, falling back to index ${input.index}`);
+            }
+          }
+          
+          if (!elementNode) {
+            throw new Error(`Click element not found using any strategy. Index: ${input.index}, aria: "${input.aria}", text: "${input.text}"`);
+          }
+
+          // Check if element is a file uploader
+          if (page.isFileUploader(elementNode)) {
+            const msg = `Index ${input.index} - has an element which opens file upload dialog. To upload files please use a specific function to upload files`;
+            logger.info(msg);
+            return new ActionResult({
+              extractedContent: msg,
+              includeInMemory: true,
+            });
+          }
+
           const initialTabIds = await this.context.browserContext.getAllTabIds();
           await page.clickElementNode(this.context.options.useVision, elementNode);
-          let msg = `Clicked button with index ${input.index}: ${elementNode.getAllTextTillNextClickableElement(2)}`;
+          let msg = `Clicked element with index ${input.index}: ${elementNode.getAllTextTillNextClickableElement(2)}`;
           logger.info(msg);
 
-          // TODO: could be optimized by chrome extension tab api
+          // Handle new tab detection
           const currentTabIds = await this.context.browserContext.getAllTabIds();
           if (currentTabIds.size > initialTabIds.size) {
             const newTabMsg = 'New tab opened - switching to it';
             msg += ` - ${newTabMsg}`;
             logger.info(newTabMsg);
-            // find the tab id that is not in the initial tab ids
             const newTabId = Array.from(currentTabIds).find(id => !initialTabIds.has(id));
             if (newTabId) {
               await this.context.browserContext.switchTab(newTabId);
             }
           }
+
           this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_OK, msg);
           return new ActionResult({ extractedContent: msg, includeInMemory: true });
+        };
+
+        // Execute with error recovery
+        try {
+          recoveryContext.targetingStrategy = targetingStrategy;
+          const result = await ErrorRecovery.executeWithRecovery(executeClickAction, recoveryContext);
+          return result;
         } catch (error) {
-          const msg = `Element no longer available with index ${input.index} - most likely the page changed`;
+          if (error instanceof Error && error.message === 'GRACEFUL_CONTINUATION') {
+            const msg = `Click action skipped but continuing task execution`;
+            logger.info(msg);
+            this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_OK, msg);
+            return new ActionResult({ 
+              extractedContent: msg, 
+              includeInMemory: true 
+            });
+          }
+
+          const msg = `Click action failed after recovery attempts: ${error instanceof Error ? error.message : String(error)}`;
+          logger.error(msg);
           this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_FAIL, msg);
           return new ActionResult({
-            error: error instanceof Error ? error.message : String(error),
+            error: msg,
           });
         }
       },
@@ -280,18 +391,93 @@ export class ActionBuilder {
         const intent = input.intent || `Input text into index ${input.index}`;
         this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_START, intent);
 
-        const page = await this.context.browserContext.getCurrentPage();
-        const state = await page.getState();
+        // 🎯 DECISION LOGGING: What LLM decided to do
+        logger.info(`🧠 LLM INPUT DECISION: index=${input.index}, text="${input.text}", intent="${intent}", xpath="${input.xpath || 'none'}", selector="${input.selector || 'none'}", placeholder="${input.placeholder || 'none'}"`);
 
-        const elementNode = state?.selectorMap.get(input.index);
-        if (!elementNode) {
-          throw new Error(`Element with index ${input.index} does not exist - retry or use alternative actions`);
+        // Enhanced element targeting with fallback strategies
+        let targetingStrategy = {
+          index: input.index,
+          xpath: input.xpath,
+          selector: input.selector,
+          placeholder: input.placeholder,
+          aria: input.aria,
+          attributes: input.attributes,
+        };
+
+        // Create recovery context
+        const recoveryContext = ErrorRecovery.createContext(
+          new Error('Initial setup'), // Will be updated with actual error
+          'input',
+          this.context.browserContext,
+          this.context
+        );
+
+        // Define the input action with error recovery
+        const executeInputAction = async (): Promise<ActionResult> => {
+          const page = await this.context.browserContext.getCurrentPage();
+          const state = await this.context.browserContext.getState();
+
+          // 🎯 ENHANCED ELEMENT FINDING: Use semantic attributes first, index as fallback
+          let elementNode = input.index !== undefined ? state.selectorMap.get(input.index) : undefined;
+          
+          // If semantic attributes provided, try enhanced finder first
+          if (input.aria || input.placeholder || input.selector) {
+            logger.info(`🔍 Using enhanced element finder: aria="${input.aria}", placeholder="${input.placeholder}", selector="${input.selector}"`);
+            
+            try {
+              const result = await EnhancedElementFinder.findElement({
+                index: input.index,
+                xpath: input.xpath,
+                selector: input.selector,
+                aria: input.aria,
+                placeholder: input.placeholder,
+                attributes: input.attributes,
+              }, state);
+              
+              if (result) {
+                elementNode = result.element;
+                logger.info(`✅ Enhanced finder success: Found element using ${result.strategy} (confidence: ${result.confidence})`);
+              } else {
+                logger.info(`⚠️ Enhanced finder failed, falling back to index ${input.index}`);
+              }
+            } catch (error) {
+              logger.info(`⚠️ Enhanced finder error: ${error}, falling back to index ${input.index}`);
+            }
+          }
+          
+          if (!elementNode) {
+            throw new Error(`Input element not found using any strategy. Index: ${input.index}, aria: "${input.aria}", placeholder: "${input.placeholder}"`);
+          }
+
+          await page.inputTextElementNode(this.context.options.useVision, elementNode, input.text);
+          const msg = `Input "${input.text}" into element with index ${input.index}`;
+          this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_OK, msg);
+          return new ActionResult({ extractedContent: msg, includeInMemory: true });
+        };
+
+        // Execute with error recovery
+        try {
+          recoveryContext.targetingStrategy = targetingStrategy;
+          const result = await ErrorRecovery.executeWithRecovery(executeInputAction, recoveryContext);
+          return result;
+        } catch (error) {
+          if (error instanceof Error && error.message === 'GRACEFUL_CONTINUATION') {
+            const msg = `Input action skipped but continuing task execution`;
+            logger.info(msg);
+            this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_OK, msg);
+            return new ActionResult({ 
+              extractedContent: msg, 
+              includeInMemory: true 
+            });
+          }
+
+          const msg = `Input action failed after recovery attempts: ${error instanceof Error ? error.message : String(error)}`;
+          logger.error(msg);
+          this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_FAIL, msg);
+          return new ActionResult({
+            error: msg,
+          });
         }
-
-        await page.inputTextElementNode(this.context.options.useVision, elementNode, input.text);
-        const msg = `Input ${input.text} into index ${input.index}`;
-        this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_OK, msg);
-        return new ActionResult({ extractedContent: msg, includeInMemory: true });
       },
       inputTextActionSchema,
       true,
@@ -586,7 +772,7 @@ export class ActionBuilder {
         this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_START, intent);
 
         const page = await this.context.browserContext.getCurrentPage();
-        const state = await page.getState();
+        const state = await this.context.browserContext.getState();
 
         const elementNode = state?.selectorMap.get(input.index);
         if (!elementNode) {
@@ -656,7 +842,7 @@ export class ActionBuilder {
         this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_START, intent);
 
         const page = await this.context.browserContext.getCurrentPage();
-        const state = await page.getState();
+        const state = await this.context.browserContext.getState();
 
         const elementNode = state?.selectorMap.get(input.index);
         if (!elementNode) {

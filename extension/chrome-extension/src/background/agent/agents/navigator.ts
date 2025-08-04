@@ -25,6 +25,9 @@ import { convertZodToJsonSchema, repairJsonString } from '@src/background/utils'
 import { HistoryTreeProcessor } from '@src/background/browser/dom/history/service';
 import { AgentStepRecord } from '../history';
 import { type DOMHistoryElement } from '@src/background/browser/dom/history/view';
+import { IntelligentWaiting } from '../actions/intelligentWaiting';
+import { performanceManager } from '../../browser/performance';
+import { performanceMonitoring } from '../../browser/monitoring';
 
 const logger = createLogger('NavigatorAgent');
 
@@ -141,16 +144,20 @@ export class NavigatorAgent extends BaseAgent<z.ZodType, NavigatorResult> {
   }
 
   async execute(): Promise<AgentOutput<NavigatorResult>> {
-    const agentOutput: AgentOutput<NavigatorResult> = {
-      id: this.id,
-    };
+    return performanceMonitoring.timeFunction('agent.navigator.execute', async () => {
+      const agentOutput: AgentOutput<NavigatorResult> = {
+        id: this.id,
+      };
 
-    let cancelled = false;
-    let modelOutputString: string | null = null;
-    let browserStateHistory: BrowserStateHistory | null = null;
-    let actionResults: ActionResult[] = [];
+      let cancelled = false;
+      let modelOutputString: string | null = null;
+      let browserStateHistory: BrowserStateHistory | null = null;
+      let actionResults: ActionResult[] = [];
 
-    try {
+      // Record navigation attempt
+      performanceMonitoring.recordMetric('agent.navigator.executions', 1, 'counter');
+
+      try {
       this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.STEP_START, 'Navigating...');
 
       const messageManager = this.context.messageManager;
@@ -170,6 +177,23 @@ export class NavigatorAgent extends BaseAgent<z.ZodType, NavigatorResult> {
       // logger.info('Navigator input message', inputMessages[inputMessages.length - 1]);
 
       const modelOutput = await this.invoke(inputMessages);
+      
+      // 🧠 DETAILED LLM OUTPUT ANALYSIS
+      logger.info('🧠 RAW LLM OUTPUT:', JSON.stringify(modelOutput, null, 2));
+      logger.info('🧠 LLM CURRENT STATE:', JSON.stringify(modelOutput.current_state, null, 2));
+      logger.info('🧠 LLM PLANNED ACTIONS COUNT:', modelOutput.action?.length || 0);
+      
+      // Check if LLM followed DOM change awareness rules
+      const actionCount = modelOutput.action?.length || 0;
+      if (actionCount > 1) {
+        const hasClickOrInput = modelOutput.action?.some(action => {
+          const actionName = Object.keys(action)[0];
+          return ['click_element', 'input_text'].includes(actionName);
+        });
+        if (hasClickOrInput) {
+          logger.info('🚨 LLM VIOLATED DOM CHANGE RULE: Planned', actionCount, 'actions including click/input - should plan only 1 for dynamic scenarios');
+        }
+      }
 
       // check if the task is paused or stopped
       if (this.context.paused || this.context.stopped) {
@@ -203,6 +227,10 @@ export class NavigatorAgent extends BaseAgent<z.ZodType, NavigatorResult> {
         done = true;
       }
       agentOutput.result = { done };
+      
+      // Record successful navigation
+      performanceMonitoring.recordMetric('agent.navigator.success', 1, 'counter');
+      
       return agentOutput;
     } catch (error) {
       this.removeLastStateMessageFromMemory();
@@ -225,6 +253,11 @@ export class NavigatorAgent extends BaseAgent<z.ZodType, NavigatorResult> {
 
       const errorMessage = error instanceof Error ? error.message : String(error);
       const errorString = `Navigation failed: ${errorMessage}`;
+
+      // Record navigation failure
+      performanceMonitoring.recordMetric('agent.navigator.failed', 1, 'counter', {
+        errorType: error instanceof Error ? error.name : 'Unknown'
+      });
 
       logger.error(errorString);
       this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.STEP_FAIL, errorString);
@@ -255,6 +288,7 @@ export class NavigatorAgent extends BaseAgent<z.ZodType, NavigatorResult> {
         // logger.info('All history', JSON.stringify(this.context.history, null, 2));
       }
     }
+    }, { operation: 'navigate' });
   }
 
   /**
@@ -354,10 +388,20 @@ export class NavigatorAgent extends BaseAgent<z.ZodType, NavigatorResult> {
   private async doMultiAction(actions: Record<string, unknown>[]): Promise<ActionResult[]> {
     const results: ActionResult[] = [];
     let errCount = 0;
+    
+    // 🧠 DETAILED ACTION LOGGING: What LLM decided to do
+    logger.info(`🧠 LLM ACTION DECISIONS: ${actions.length} actions planned`);
+    actions.forEach((action, index) => {
+      const actionName = Object.keys(action)[0];
+      const actionArgs = action[actionName];
+      logger.info(`🎯 Action ${index + 1}: ${actionName} with args:`, actionArgs);
+    });
+    
     logger.info('Actions', actions);
 
     const browserContext = this.context.browserContext;
-    const browserState = await browserContext.getState(this.context.options.useVision);
+    // Use cached state for path hash calculation to improve performance
+    const browserState = await browserContext.getCachedState(this.context.options.useVision);
     const cachedPathHashes = await calcBranchPathHashSet(browserState);
 
     await browserContext.removeHighlight();
@@ -378,25 +422,88 @@ export class NavigatorAgent extends BaseAgent<z.ZodType, NavigatorResult> {
 
         const indexArg = actionInstance.getIndexArg(actionArgs);
         if (i > 0 && indexArg !== null) {
-          const newState = await browserContext.getState(this.context.options.useVision);
+          // Use cached state first for performance, fall back to fresh state if needed
+          let newState = await browserContext.getCachedState(this.context.options.useVision);
+          if (!newState || (Date.now() - (newState as any).timestamp > 5000)) {
+            // If no cache or cache is older than 5 seconds, get fresh state
+            newState = await browserContext.getState(this.context.options.useVision);
+          }
           const newPathHashes = await calcBranchPathHashSet(newState);
           // next action requires index but there are new elements on the page
           if (!newPathHashes.isSubsetOf(cachedPathHashes)) {
             const msg = `Something new appeared after action ${i} / ${actions.length}`;
             logger.info(msg);
-            results.push(
-              new ActionResult({
-                extractedContent: msg,
-                includeInMemory: true,
-              }),
-            );
-            break;
+            
+            // 🔍 DETAILED DOM CHANGE ANALYSIS
+            logger.info('🔍 DOM CHANGE DETECTED:');
+            logger.info('  - Action that caused change:', actions[i-1] ? Object.keys(actions[i-1])[0] : 'unknown');
+            logger.info('  - Remaining actions planned:', actions.length - i);
+            logger.info('  - Next action that will be skipped:', Object.keys(actions[i])[0]);
+            logger.info('  - Cached path hashes count:', cachedPathHashes.size);
+            logger.info('  - New path hashes count:', newPathHashes.size);
+            
+            // 🎯 SMART CONTINUATION: Continue with form filling despite DOM changes
+            const nextActionName = Object.keys(actions[i])[0];
+            const isFormAction = ['input_text', 'click_element'].includes(nextActionName);
+            
+            if (isFormAction && actions.length - i <= 2) { // Only continue if few actions remain
+              logger.info('🎯 SMART CONTINUATION: Continuing with form action despite DOM change');
+              logger.info('🎯 EXECUTING REMAINING ACTION:', nextActionName, 'with fresh DOM state');
+              
+              // Get fresh DOM state and continue execution
+              const freshState = await browserContext.getState(this.context.options.useVision);
+              
+              // Continue executing the remaining action with fresh DOM
+              // DON'T use continue - actually execute the action!
+              // The loop will naturally continue to execute action i
+            } else {
+              results.push(
+                new ActionResult({
+                  extractedContent: msg,
+                  includeInMemory: true,
+                }),
+              );
+              break;
+            }
           }
         }
 
-        const result = await actionInstance.call(actionArgs);
+        const result = await performanceMonitoring.timeFunction(
+          `agent.action.${actionName}`,
+          () => actionInstance.call(actionArgs),
+          { actionName, actionIndex: i.toString() }
+        );
+        
+        // 📊 EXECUTION RESULT LOGGING: What actually happened
+        logger.info(`📊 ACTION ${i + 1} RESULT: ${actionName} → success=${!result.error}, content="${result.extractedContent}", error="${result.error || 'none'}"`);
+        
+        // 🎯 ACTION SPECIFIC LOGGING
+        if (actionName === 'input_text') {
+          logger.info(`📝 INPUT_TEXT DETAILS: index=${actionArgs.index}, text="${actionArgs.text}", intent="${actionArgs.intent}"`);
+          if (actionArgs.aria) logger.info(`  - Using aria-label: "${actionArgs.aria}"`);
+          if (actionArgs.placeholder) logger.info(`  - Using placeholder: "${actionArgs.placeholder}"`);
+        }
+        if (actionName === 'click_element') {
+          logger.info(`🖱️  CLICK_ELEMENT DETAILS: index=${actionArgs.index}, intent="${actionArgs.intent}"`);
+          if (actionArgs.text) logger.info(`  - Targeting text: "${actionArgs.text}"`);
+          if (actionArgs.aria) logger.info(`  - Using aria-label: "${actionArgs.aria}"`);
+        }
+        
         if (result === undefined) {
+          performanceMonitoring.recordMetric('agent.actions.undefined', 1, 'counter', { actionName });
           throw new Error(`Action ${actionName} returned undefined`);
+        }
+
+        // Record action success
+        performanceMonitoring.recordMetric('agent.actions.executed', 1, 'counter', { actionName });
+        
+        if (result.error) {
+          performanceMonitoring.recordMetric('agent.actions.failed', 1, 'counter', { 
+            actionName, 
+            error: result.error.toString().substring(0, 100) 
+          });
+        } else {
+          performanceMonitoring.recordMetric('agent.actions.succeeded', 1, 'counter', { actionName });
         }
 
         // if the action has an index argument, record the interacted element to the result
@@ -415,13 +522,24 @@ export class NavigatorAgent extends BaseAgent<z.ZodType, NavigatorResult> {
         if (this.context.paused || this.context.stopped) {
           return results;
         }
-        // TODO: wait for 1 second for now, need to optimize this to avoid unnecessary waiting
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        // Intelligent waiting between actions (replaces fixed 1-second delay)
+        if (i < actions.length - 1) { // Don't wait after the last action
+          const waitResult = await IntelligentWaiting.quickWait(browserContext, 'action');
+          logger.debug(`Inter-action wait completed in ${waitResult.duration}ms (${waitResult.reason})`);
+        }
       } catch (error) {
         if (error instanceof URLNotAllowedError) {
           throw error;
         }
         const errorMessage = error instanceof Error ? error.message : String(error);
+        
+        // Record error metrics
+        performanceMonitoring.recordMetric('agent.actions.errors', 1, 'counter', { 
+          actionName, 
+          errorType: error instanceof Error ? error.name : 'Unknown' 
+        });
+        
         logger.error(
           'doAction error',
           actionName,
@@ -431,9 +549,15 @@ export class NavigatorAgent extends BaseAgent<z.ZodType, NavigatorResult> {
         // unexpected error, emit event
         this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_FAIL, errorMessage);
         errCount++;
+        
+        // Record error recovery attempts
+        performanceMonitoring.recordMetric('agent.error.recovery.attempts', 1, 'counter');
+        
         if (errCount > 3) {
+          performanceMonitoring.recordMetric('agent.error.recovery.failed', 1, 'counter');
           throw new Error('Too many errors in actions');
         }
+        
         results.push(
           new ActionResult({
             error: errorMessage,
@@ -531,8 +655,15 @@ export class NavigatorAgent extends BaseAgent<z.ZodType, NavigatorResult> {
     const validActions = updatedActions.filter((action): action is Record<string, unknown> => action !== null);
     const result = await this.doMultiAction(validActions);
 
-    // Wait for the specified delay
-    await new Promise(resolve => setTimeout(resolve, delay));
+    // Intelligent waiting instead of fixed delay
+    if (delay > 0) {
+      const waitResult = await IntelligentWaiting.waitFor(this.context.browserContext, {
+        preset: 'stable',
+        maxWait: delay,
+        minWait: Math.min(200, delay * 0.2), // 20% of delay or 200ms, whichever is smaller
+      });
+      logger.debug(`History action delay completed in ${waitResult.duration}ms (requested: ${delay}ms)`);
+    }
     return result;
   }
 

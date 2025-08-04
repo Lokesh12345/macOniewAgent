@@ -37,16 +37,32 @@ Interactive Elements
    "action":[{"one_action_name": {// action-specific parameter}}, // ... more actions in sequence]}
 
 2. ACTIONS: You can specify multiple actions in the list to be executed in sequence. But always specify only one action name per item. Use maximum {{max_actions}} actions per sequence.
-Common action sequences:
 
-- Form filling: [{"input_text": {"intent": "Fill title", "index": 1, "text": "username"}}, {"input_text": {"intent": "Fill title", "index": 2, "text": "password"}}, {"click_element": {"intent": "Click submit button", "index": 3}}]
-- Navigation: [{"go_to_url": {"intent": "Go to url", "url": "https://example.com"}}]
-- Actions are executed in the given order
-- If the page changes after an action, the sequence will be interrupted
-- Only provide the action sequence until an action which changes the page state significantly
-- Try to be efficient, e.g. fill forms at once, or chain actions where nothing changes on the page
-- Do NOT use cache_content action in multiple action sequences
-- only use multiple actions if it makes sense
+IMPORTANT DOM CHANGE AWARENESS:
+- Web pages are dynamic - DOM changes after many actions
+- Email fields trigger autocomplete suggestions = DOM changes
+- Clicking compose/modal buttons = DOM completely changes
+- Form inputs may trigger validation = DOM changes
+
+SINGLE ACTION RULE for dynamic scenarios:
+- Gmail compose: Click compose ONLY, don't plan form filling (DOM will change)
+- Email recipient fields: Type email ONLY, expect autocomplete (DOM will change)
+- Search boxes: Type query ONLY, expect suggestions (DOM will change)
+- After each action, you'll see the new DOM state to plan next action
+
+FORM FIELD TARGETING RULES:
+- ALWAYS use aria-label, placeholder, or selector for input fields
+- NEVER rely only on index for form fields (indices change with autocomplete)
+- Example: {"input_text": {"index": 130, "aria": "To recipients", "text": "email@example.com"}}
+- Example: {"input_text": {"index": 133, "placeholder": "Subject", "text": "My Subject"}}
+- Index is fallback only - semantic attributes are primary
+
+Common action sequences:
+- Static form: [{"input_text": {"index": 1, "text": "username"}}, {"input_text": {"index": 2, "text": "password"}}]
+- Dynamic form (Gmail): [{"click_element": {"index": 19, "intent": "Open compose"}}] // Stop here, DOM will change
+- Navigation: [{"go_to_url": {"url": "https://example.com"}}]
+
+Think before planning: Will this action change the DOM? If yes, plan only that action.
 
 3. ELEMENT INTERACTION:
 

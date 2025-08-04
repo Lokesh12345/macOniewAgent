@@ -21,6 +21,8 @@ import { type BrowserContextConfig, DEFAULT_BROWSER_CONTEXT_CONFIG, type PageSta
 import { createLogger } from '@src/background/log';
 import { ClickableElementProcessor } from './dom/clickable/service';
 import { isUrlAllowed } from './util';
+import { performanceManager } from './performance';
+import { taskMemoryManager, type FormFieldMemory } from './navigation/taskMemory';
 
 const logger = createLogger('Page');
 
@@ -67,6 +69,7 @@ export default class Page {
   private _validWebPage = false;
   private _cachedState: PageState | null = null;
   private _cachedStateClickableElementsHashes: CachedStateClickableElementsHashes | null = null;
+  private _taskId: string | null = null;
 
   constructor(tabId: number, url: string, title: string, config: Partial<BrowserContextConfig> = {}) {
     this._tabId = tabId;
@@ -94,6 +97,67 @@ export default class Page {
     return this._validWebPage && this._puppeteerPage !== null;
   }
 
+  get state(): PageState {
+    return this._state;
+  }
+
+  setTaskId(taskId: string): void {
+    this._taskId = taskId;
+  }
+
+  /**
+   * Remember a form field that was filled
+   */
+  rememberFormField(fieldName: string, fieldValue: string, fieldType: string, selector: string): void {
+    if (!this._taskId) return;
+
+    const formField: FormFieldMemory = {
+      fieldName,
+      fieldValue,
+      fieldType,
+      selector,
+      timestamp: Date.now()
+    };
+
+    taskMemoryManager.rememberFormField(this._taskId, formField);
+  }
+
+  /**
+   * Remember a successful element interaction
+   */
+  rememberSuccessfulInteraction(element: DOMElementNode, action: string, context: string): void {
+    if (!this._taskId) return;
+
+    taskMemoryManager.rememberSuccessfulElement(this._taskId, element, action, context);
+  }
+
+  /**
+   * Remember a failed selector
+   */
+  rememberFailedSelector(selector: string): void {
+    if (!this._taskId) return;
+
+    taskMemoryManager.rememberFailedSelector(this._taskId, selector);
+  }
+
+  /**
+   * Get remembered form data for restoration
+   */
+  getRememberedFormData(): Map<string, FormFieldMemory> {
+    if (!this._taskId) return new Map();
+
+    return taskMemoryManager.getFormData(this._taskId);
+  }
+
+  /**
+   * Check if a selector should be avoided (previously failed)
+   */
+  shouldAvoidSelector(selector: string): boolean {
+    if (!this._taskId) return false;
+
+    return taskMemoryManager.isFailedSelector(this._taskId, selector);
+  }
+
   async attachPuppeteer(): Promise<boolean> {
     if (!this._validWebPage) {
       return false;
@@ -104,15 +168,37 @@ export default class Page {
     }
 
     logger.info('attaching puppeteer', this._tabId);
-    const browser = await connect({
-      transport: await ExtensionTransport.connectTab(this._tabId),
-      defaultViewport: null,
-      protocol: 'cdp' as ProtocolType,
-    });
-    this._browser = browser;
+    
+    // Try to get pooled connection first
+    const pooledConnection = await performanceManager.getPooledConnection(
+      this._tabId,
+      async () => {
+        const browser = await connect({
+          transport: await ExtensionTransport.connectTab(this._tabId),
+          defaultViewport: null,
+          protocol: 'cdp' as ProtocolType,
+        });
+        const [page] = await browser.pages();
+        return { browser, page };
+      }
+    );
 
-    const [page] = await browser.pages();
-    this._puppeteerPage = page;
+    if (pooledConnection) {
+      logger.info(`Using pooled connection for tab ${this._tabId}`);
+      this._browser = pooledConnection.browser;
+      this._puppeteerPage = pooledConnection.page;
+    } else {
+      // Fallback to direct connection if pooling fails
+      logger.info(`Fallback to direct connection for tab ${this._tabId}`);
+      const browser = await connect({
+        transport: await ExtensionTransport.connectTab(this._tabId),
+        defaultViewport: null,
+        protocol: 'cdp' as ProtocolType,
+      });
+      this._browser = browser;
+      const [page] = await browser.pages();
+      this._puppeteerPage = page;
+    }
 
     // Add anti-detection scripts
     await this._addAntiDetectionScripts();
@@ -164,12 +250,70 @@ export default class Page {
 
   async detachPuppeteer(): Promise<void> {
     if (this._browser) {
+      // Preserve context before detachment
+      if (this._taskId && this._state.url) {
+        this.preserveCurrentContext();
+      }
+
+      // Release connection back to pool
+      performanceManager.releaseConnection(this._tabId);
+      
       await this._browser.disconnect();
       this._browser = null;
       this._puppeteerPage = null;
-      // reset the state
-      this._state = build_initial_state(this._tabId);
+      
+      // Smart state reset - preserve some context
+      this.smartStateReset();
     }
+  }
+
+  /**
+   * Preserve current context to task memory
+   */
+  private preserveCurrentContext(): void {
+    if (!this._taskId) return;
+
+    // Remember form fields that were filled
+    this.preserveFormFields();
+    
+    // Remember successful elements
+    this.preserveElementPatterns();
+  }
+
+  /**
+   * Preserve filled form fields
+   */
+  private preserveFormFields(): void {
+    if (!this._taskId) return;
+
+    // This would need to be called when forms are actually filled
+    // For now, just log that we're preserving context
+    logger.debug(`Preserving form context for task ${this._taskId}`);
+  }
+
+  /**
+   * Preserve successful element patterns
+   */  
+  private preserveElementPatterns(): void {
+    if (!this._taskId) return;
+
+    // This would be called when elements are successfully interacted with
+    logger.debug(`Preserving element patterns for task ${this._taskId}`);
+  }
+
+  /**
+   * Smart state reset - preserve essential context
+   */
+  private smartStateReset(): void {
+    const oldUrl = this._state.url;
+    const oldTitle = this._state.title;
+    
+    // Reset to initial but keep basic info
+    this._state = build_initial_state(this._tabId, oldUrl, oldTitle);
+    
+    // Clear caches
+    this._cachedState = null;
+    this._cachedStateClickableElementsHashes = null;
   }
 
   async removeHighlight(): Promise<void> {
@@ -1618,5 +1762,16 @@ export default class Page {
 
       throw new URLNotAllowedError(errorMessage);
     }
+  }
+
+  /**
+   * Evaluate JavaScript in the page context
+   * Used by IntelligentWaiting for condition checking
+   */
+  async evaluateInPage<T>(pageFunction: string | ((...args: any[]) => T), ...args: any[]): Promise<T> {
+    if (!this._puppeteerPage) {
+      throw new Error('Puppeteer page is not connected');
+    }
+    return this._puppeteerPage.evaluate(pageFunction, ...args);
   }
 }
