@@ -28,7 +28,8 @@
       "Bash(grep:*)",
       "Bash(npm run build:*)",
       "Bash(pnpm type-check:*)",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Bash(pnpm run:*)"
     ],
     "deny": []
   }

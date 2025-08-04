@@ -4,12 +4,14 @@ import { RxDiscordLogo } from 'react-icons/rx';
 import { FiSettings } from 'react-icons/fi';
 import { PiPlusBold } from 'react-icons/pi';
 import { GrHistory } from 'react-icons/gr';
+import { MdSearch } from 'react-icons/md';
 import { type Message, Actors, chatHistoryStore, agentModelStore, generalSettingsStore } from '@extension/storage';
 import favoritesStorage, { type FavoritePrompt } from '@extension/storage/lib/prompt/favorites';
 import MessageList from './components/MessageList';
 import ChatInput from './components/ChatInput';
 import ChatHistoryList from './components/ChatHistoryList';
 import BookmarkList from './components/BookmarkList';
+import DOMAnalyzer from './components/DOMAnalyzer';
 import { EventType, type AgentEvent, ExecutionState } from './types/event';
 import './SidePanel.css';
 
@@ -26,6 +28,7 @@ const SidePanel = () => {
   const [showStopButton, setShowStopButton] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
+  const [showDOMAnalyzer, setShowDOMAnalyzer] = useState(false);
   const [chatSessions, setChatSessions] = useState<Array<{ id: string; title: string; createdAt: number }>>([]);
   const [isFollowUpMode, setIsFollowUpMode] = useState(false);
   const [isHistoricalSession, setIsHistoricalSession] = useState(false);
@@ -690,12 +693,18 @@ const SidePanel = () => {
 
   const handleBackToChat = (reset = false) => {
     setShowHistory(false);
+    setShowDOMAnalyzer(false);
     if (reset) {
       setCurrentSessionId(null);
       setMessages([]);
       setIsFollowUpMode(false);
       setIsHistoricalSession(false);
     }
+  };
+
+  const handleToggleDOMAnalyzer = () => {
+    setShowDOMAnalyzer(!showDOMAnalyzer);
+    setShowHistory(false);
   };
 
   const handleSessionSelect = async (sessionId: string) => {
@@ -1004,7 +1013,7 @@ const SidePanel = () => {
         className={`flex h-screen flex-col ${isDarkMode ? 'bg-slate-900' : "bg-[url('/bg.jpg')] bg-cover bg-no-repeat"} overflow-hidden border ${isDarkMode ? 'border-sky-800' : 'border-[rgb(186,230,253)]'} rounded-2xl`}>
         <header className="header relative">
           <div className="header-logo">
-            {showHistory ? (
+            {showHistory || showDOMAnalyzer ? (
               <button
                 type="button"
                 onClick={() => handleBackToChat(false)}
@@ -1017,7 +1026,7 @@ const SidePanel = () => {
             )}
           </div>
           <div className="header-icons">
-            {!showHistory && (
+            {!showHistory && !showDOMAnalyzer && (
               <>
                 <button
                   type="button"
@@ -1039,6 +1048,16 @@ const SidePanel = () => {
                 </button>
               </>
             )}
+            <button
+              type="button"
+              onClick={handleToggleDOMAnalyzer}
+              onKeyDown={e => e.key === 'Enter' && handleToggleDOMAnalyzer()}
+              className={`header-icon ${isDarkMode ? 'text-sky-400 hover:text-sky-300' : 'text-sky-400 hover:text-sky-500'} cursor-pointer ${showDOMAnalyzer ? 'bg-sky-600/20' : ''}`}
+              aria-label="DOM Analyzer"
+              title="DOM Analyzer"
+              tabIndex={0}>
+              <MdSearch size={20} />
+            </button>
             <a
               href="https://discord.gg/NN3ABHggMK"
               target="_blank"
@@ -1067,6 +1086,10 @@ const SidePanel = () => {
               visible={true}
               isDarkMode={isDarkMode}
             />
+          </div>
+        ) : showDOMAnalyzer ? (
+          <div className="flex-1 overflow-hidden">
+            <DOMAnalyzer isDarkMode={isDarkMode} />
           </div>
         ) : (
           <>

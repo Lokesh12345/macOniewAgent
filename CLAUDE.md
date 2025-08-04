@@ -20,6 +20,7 @@ Oniew Agent is a sophisticated macOS application that combines a native SwiftUI 
    - Multi-agent AI system (Navigator, Planner, Validator)
    - Browser automation and web interaction capabilities
    - Connects to Mac app via WebSocket for task coordination
+   - Monorepo structure using pnpm workspaces and Turbo for build orchestration
 
 3. **Communication Layer**
    - WebSocket server implementation with custom protocol
@@ -30,7 +31,8 @@ Oniew Agent is a sophisticated macOS application that combines a native SwiftUI 
 - **Platform**: macOS 12.0+ (SwiftUI, Foundation, Network)
 - **Language**: Swift for Mac app, TypeScript for extension
 - **Communication**: Custom WebSocket protocol
-- **AI Integration**: Multi-provider support (OpenAI, Anthropic, Ollama, etc.)
+- **AI Integration**: Multi-provider support (OpenAI, Anthropic, Ollama, Groq, Cerebras, etc.)
+- **Build System**: Xcode for Mac app, pnpm + Turbo for extension monorepo
 
 ## Development Commands
 
@@ -51,33 +53,48 @@ xcodebuild -project "Oniew Agent.xcodeproj" clean
 
 ### Chrome Extension (located in `extension/`)
 ```bash
-# Install dependencies
+# Install dependencies (from extension/ directory)
 pnpm install
 
-# Development build with hot reload
+# Development build with hot reload and file watching
 pnpm dev
 
 # Production build
 pnpm build
 
-# Type checking
+# Build for Firefox
+pnpm build:firefox
+
+# Type checking across all packages
 pnpm type-check
 
 # Linting and formatting
 pnpm lint
+pnpm lint:fix
 pnpm prettier
 
-# Clean all build artifacts
-pnpm clean
+# Package for distribution
+pnpm zip
+pnpm zip:firefox
+
+# Clean build artifacts
+pnpm clean:bundle      # Remove dist/ and build/ directories
+pnpm clean:turbo       # Remove .turbo cache
+pnpm clean:node_modules # Remove all node_modules
+pnpm clean             # Full clean of all artifacts
 ```
 
 ### WebSocket Server Testing
 ```bash
-# Test WebSocket connection (requires Node.js and ws package)
+# Test WebSocket connection from project root (requires Node.js and ws package)
 node test-websocket.js
+node test-websocket-server.js
 
 # Start Ollama server (if using local models)
 ./start-ollama.sh
+
+# Check if port 41899 is in use
+lsof -ti:41899
 ```
 
 ## Architecture Patterns
@@ -119,8 +136,12 @@ node test-websocket.js
 
 ### Permissions & Entitlements
 - App uses borderless window style with floating level
-- Required entitlements for system access defined in `Oniew_Agent.entitlements`
-- Network permissions for WebSocket server operation
+- Required entitlements for system access defined in `Oniew_Agent.entitlements`:
+  - Network client/server for WebSocket communication
+  - Audio input and screen capture capabilities
+  - File system access for user-selected files
+  - Automation Apple Events for system integration
+  - Subprocess execution for port management
 
 ### Error Handling
 - WebSocket server includes robust reconnection logic
@@ -140,25 +161,19 @@ node test-websocket.js
 ## Extension Integration
 
 ### Build Integration
-The extension uses a monorepo structure with:
-- `pages/` - Different extension pages (options, side-panel, content)
-- `chrome-extension/` - Main extension logic and background scripts
-- `packages/` - Shared packages and utilities
+The extension uses a monorepo structure managed by pnpm workspaces and Turbo:
+- `pages/` - Different extension pages (options, side-panel, content) - each with own Vite config
+- `chrome-extension/` - Main extension logic, background scripts, and agent system
+- `packages/storage/` - Shared storage utilities and settings defaults
+- `turbo.json` - Turbo build configuration for task orchestration
+- `pnpm-workspace.yaml` - Defines workspace packages
 
-### Key Extension Commands
-```bash
-# Build for Chrome (default)
-pnpm build
-
-# Build for Firefox
-pnpm build:firefox
-
-# Package for distribution
-pnpm zip
-
-# Development with file watching
-pnpm dev
-```
+### Extension Architecture Details
+- **Multi-Agent System**: Navigator (web interactions), Planner (task planning), Validator (result verification)
+- **Background Script**: Service worker handling WebSocket communication and task coordination
+- **Content Scripts**: DOM manipulation and page interaction capabilities
+- **Side Panel**: React-based chat interface for user interactions
+- **Options Page**: React-based settings configuration interface
 
 ## Common Development Tasks
 
@@ -176,5 +191,12 @@ pnpm dev
 ### Debugging Connection Issues
 1. Check WebSocket server logs in Xcode console
 2. Verify port 41899 availability: `lsof -ti:41899`
-3. Test with provided WebSocket test scripts
-4. Monitor extension console for connection errors
+3. Test with provided WebSocket test scripts (`test-websocket.js`, `test-websocket-server.js`)
+4. Monitor extension console for connection errors (chrome://extensions/ → "Inspect views: service worker")
+5. Review detailed debugging steps in `DEBUG_GUIDE.md`
+
+## Additional Documentation
+- `DEBUG_GUIDE.md` - Comprehensive WebSocket connection troubleshooting
+- `CONNECTION_ANALYSIS.md` - Connection flow analysis and debugging
+- `WEBSOCKET_SETUP.md` - WebSocket server setup and configuration details
+- `extension/README.md` - Nanobrowser extension documentation
