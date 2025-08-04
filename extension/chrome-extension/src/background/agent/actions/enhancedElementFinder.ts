@@ -27,7 +27,7 @@ export interface MatchResult {
 export class EnhancedElementFinder {
   /**
    * Find element using multiple targeting strategies
-   * SEMANTIC-FIRST priority order to handle dynamic DOM changes
+   * INDEX-FIRST priority order with semantic fallback
    */
   static async findElement(
     strategy: TargetingStrategy,
@@ -37,7 +37,39 @@ export class EnhancedElementFinder {
 
     logger.info(`🔍 ENHANCED ELEMENT FINDER: Starting search with strategy:`, strategy);
 
-    // PRIORITY 1: Aria label matching (SEMANTIC - most reliable)
+    // PRIORITY 1: Index matching (PRIMARY - best for stable DOM)
+    if (strategy.index !== undefined) {
+      const result = this.findByIndex(strategy.index, browserState);
+      attempts.push({ strategy: 'index', result });
+      if (result) {
+        logger.info(`✅ FOUND via INDEX (PRIMARY): ${strategy.index} → ${result.element.tagName}[${result.element.highlightIndex}]`);
+        
+        // Simple validation: Basic element type checking
+        const hasSemanticAttributes = strategy.aria || strategy.placeholder;
+        if (hasSemanticAttributes) {
+          // LLM provided semantic info - validate the index match makes sense
+          const validated = this.validateIndexMatch(result, strategy);
+          if (validated) {
+            logger.info(`✅ INDEX VALIDATED: Element passes semantic validation`);
+            return result;
+          } else {
+            logger.warn(`⚠️ INDEX VALIDATION FAILED: Continuing to semantic fallback strategies`);
+            // Don't return - continue to semantic fallback
+          }
+        } else {
+          // LLM only provided index - trust it (backward compatibility for e-commerce)
+          logger.info(`📋 INDEX ONLY: Direct index targeting (e-commerce mode)`);
+          return result;
+        }
+      } else {
+        logger.warn(`❌ INDEX search failed: ${strategy.index} not found - falling back to semantic strategies`);
+      }
+    }
+
+    // SEMANTIC FALLBACK STRATEGIES (only when index fails or is invalid)
+    logger.info(`🔄 SEMANTIC FALLBACK: Index unavailable/failed, trying semantic strategies...`);
+
+    // PRIORITY 2: Aria label matching (SEMANTIC - most reliable)
     if (strategy.aria) {
       try {
         const result = this.findByAria(strategy.aria, browserState);
@@ -54,7 +86,7 @@ export class EnhancedElementFinder {
       }
     }
 
-    // PRIORITY 2: Placeholder matching (SEMANTIC - form field specific)
+    // PRIORITY 3: Placeholder matching (SEMANTIC - form field specific)
     if (strategy.placeholder) {
       try {
         const result = this.findByPlaceholder(strategy.placeholder, browserState);
@@ -71,7 +103,7 @@ export class EnhancedElementFinder {
       }
     }
 
-    // PRIORITY 3: Attribute matching (SEMANTIC - specific attributes)
+    // PRIORITY 4: Attribute matching (SEMANTIC - specific attributes)
     if (strategy.attributes && Object.keys(strategy.attributes).length > 0) {
       const result = this.findByAttributes(strategy.attributes, browserState);
       attempts.push({ strategy: 'attributes', result });
@@ -84,7 +116,7 @@ export class EnhancedElementFinder {
       }
     }
 
-    // PRIORITY 4: Text content matching (CONTENT-BASED)
+    // PRIORITY 5: Text content matching (CONTENT-BASED)
     if (strategy.text) {
       const result = this.findByText(strategy.text, browserState);
       attempts.push({ strategy: 'text', result });
@@ -96,7 +128,7 @@ export class EnhancedElementFinder {
       }
     }
 
-    // PRIORITY 5: CSS Selector (STRUCTURAL - more stable than XPath)
+    // PRIORITY 6: CSS Selector (STRUCTURAL - more stable than XPath)
     if (strategy.selector) {
       const result = this.findBySelector(strategy.selector, browserState);
       attempts.push({ strategy: 'selector', result });
@@ -108,7 +140,7 @@ export class EnhancedElementFinder {
       }
     }
 
-    // PRIORITY 6: XPath (STRUCTURAL - can break with DOM changes)
+    // PRIORITY 7: XPath (STRUCTURAL - can break with DOM changes)
     if (strategy.xpath) {
       const result = this.findByXPath(strategy.xpath, browserState);
       attempts.push({ strategy: 'xpath', result });
@@ -117,36 +149,6 @@ export class EnhancedElementFinder {
         return result;
       } else {
         logger.warn(`❌ XPATH search failed: "${strategy.xpath}" not found`);
-      }
-    }
-
-    // PRIORITY 7: Index (FALLBACK - but still functional)
-    if (strategy.index !== undefined) {
-      const result = this.findByIndex(strategy.index, browserState);
-      attempts.push({ strategy: 'index', result });
-      if (result) {
-        logger.info(`⚠️ FOUND via INDEX (FALLBACK): ${strategy.index} → ${result.element.tagName}[${result.element.highlightIndex}]`);
-        
-        // SMART VALIDATION: Only reject if we're confident it's wrong
-        const hasSemanticAttributes = strategy.aria || strategy.placeholder || strategy.selector || strategy.text;
-        
-        if (hasSemanticAttributes) {
-          // LLM provided semantic info but we fell back to index - validate more strictly
-          const validated = this.validateIndexMatch(result, strategy);
-          if (validated) {
-            logger.info(`✅ INDEX VALIDATED: Element has reasonable semantic attributes`);
-            return result;
-          } else {
-            logger.warn(`⚠️ INDEX UNCERTAIN: Element found but may be wrong. Using anyway as last resort.`);
-            return result; // Return anyway - better than failing completely
-          }
-        } else {
-          // LLM only provided index - trust it (backward compatibility)
-          logger.info(`📋 INDEX ONLY: LLM provided only index, using directly (backward compatibility)`);
-          return result;
-        }
-      } else {
-        logger.warn(`❌ INDEX search failed: ${strategy.index} not found`);
       }
     }
 
@@ -393,6 +395,7 @@ export class EnhancedElementFinder {
 
   /**
    * Validate that index match actually makes sense semantically
+   * VERY PERMISSIVE: Only reject obvious mismatches
    */
   private static validateIndexMatch(result: MatchResult, strategy: TargetingStrategy): boolean {
     logger.info(`🔍 INDEX VALIDATION: Checking if index ${strategy.index} element makes semantic sense`);
@@ -417,29 +420,28 @@ export class EnhancedElementFinder {
     
     logger.info(`📊 INDEX ELEMENT ANALYSIS: tagName=${element.tagName}, isFormField=${isFormField}, isClickable=${isClickable}, hasSemanticAttributes=${hasSemanticAttributes}`);
     
-    // PERMISSIVE VALIDATION: Accept if element seems reasonable
+    // VERY PERMISSIVE VALIDATION: Optimized for e-commerce sites
     
-    // 1. Interactive elements are generally safe to interact with
-    if (isClickable || isFormField) {
-      logger.info(`✅ INDEX VALIDATION PASSED: Element is interactive (${element.tagName})`);
-      return true;
+    // Only reject if we find a CLEAR semantic mismatch (e.g., "To" field but element is for "Subject")
+    if (strategy.aria && attrs['aria-label']) {
+      const targetAria = strategy.aria.toLowerCase();
+      const elementAria = attrs['aria-label'].toLowerCase();
+      
+      // Only reject if they're clearly different field types
+      const targetIsEmail = targetAria.includes('to') || targetAria.includes('recipient');
+      const elementIsSubject = elementAria.includes('subject');
+      const targetIsSubject = targetAria.includes('subject');
+      const elementIsEmail = elementAria.includes('to') || elementAria.includes('recipient');
+      
+      if ((targetIsEmail && elementIsSubject) || (targetIsSubject && elementIsEmail)) {
+        logger.warn(`❌ CLEAR SEMANTIC MISMATCH: Want "${targetAria}" but element is "${elementAria}"`);
+        return false;
+      }
     }
     
-    // 2. Elements with semantic attributes are likely intentional
-    if (hasSemanticAttributes) {
-      logger.info(`✅ INDEX VALIDATION PASSED: Element has semantic attributes`);
-      return true;
-    }
-    
-    // 3. DIV elements can be clickable in modern web apps (like Gmail compose button)
-    if (element.tagName?.toLowerCase() === 'div' && element.isInteractive) {
-      logger.info(`✅ INDEX VALIDATION PASSED: Interactive div element (modern web app)`);
-      return true;
-    }
-    
-    // 4. Be permissive - only reject obviously wrong elements
-    logger.warn(`⚠️ INDEX VALIDATION UNCERTAIN: Element type ${element.tagName} - proceeding cautiously`);
-    return true; // Changed from false to true - be permissive
+    // Otherwise, accept the element (e-commerce sites depend on index)
+    logger.info(`✅ INDEX VALIDATION PASSED: Element accepted for interaction`);
+    return true;
   }
 
 
