@@ -446,10 +446,19 @@ export class NavigatorAgent extends BaseAgent<z.ZodType, NavigatorResult> {
         }
         results.push(result);
 
+        /**
+         * CRITICAL: Sequence breaking for autocomplete - DO NOT REMOVE THIS BREAK STATEMENT
+         * When Gmail autocomplete appears, it completely changes the DOM structure and all
+         * subsequent element indices become invalid. Without this break, the system will
+         * try to execute remaining actions with wrong indices, causing text to be entered
+         * in wrong fields (e.g., email in subject field, subject in body field).
+         * 
+         * See docs/AUTOCOMPLETE_HANDLING.md for full details.
+         */
         // Check if autocomplete was detected - if so, break the sequence immediately
         if (result.extractedContent?.includes('Autocomplete appeared')) {
           console.log(`🎯 SEQUENCE BREAK: Autocomplete detected, stopping remaining ${actions.length - i - 1} actions`);
-          break;
+          break; // ← THIS BREAK IS CRITICAL - DO NOT REMOVE
         }
 
         // check if the task is paused or stopped

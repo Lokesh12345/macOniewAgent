@@ -353,6 +353,19 @@ export class ActionBuilder {
           });
         }
 
+        /**
+         * CRITICAL AUTOCOMPLETE HANDLING - DO NOT MODIFY WITHOUT READING docs/AUTOCOMPLETE_HANDLING.md
+         * 
+         * This section handles Gmail autocomplete which completely changes DOM structure.
+         * Key requirements:
+         * 1. MUST validate element types before input (prevents span/button targeting)
+         * 2. MUST detect autocomplete ONLY on combobox inputs (prevents false positives)
+         * 3. MUST break action sequence when autocomplete detected (prevents wrong field targeting)
+         * 4. MUST trigger re-planning after autocomplete (gives LLM fresh DOM state)
+         * 
+         * Breaking these rules will cause Gmail compose to fail catastrophically.
+         */
+        
         // Element type validation - only allow proper input elements
         const validInputElements = ['input', 'textarea'];
         const validComboboxElements = ['input', 'div']; // Gmail uses div with contenteditable for some fields
