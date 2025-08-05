@@ -152,12 +152,14 @@ export class DOMPatternLearner {
               }
               return false;
             `;
-            success = await browserContext.page.evaluate(script);
+            const page = await browserContext.getCurrentPage();
+            success = await page.evaluateInPage(script);
           }
           break;
 
         case 'escape':
-          await browserContext.page.keyboard.press('Escape');
+          const page = await browserContext.getCurrentPage();
+          await page.sendKeys('Escape');
           success = true;
           break;
 
@@ -171,13 +173,15 @@ export class DOMPatternLearner {
               }
               return false;
             `;
-            success = await browserContext.page.evaluate(script);
+            const page = await browserContext.getCurrentPage();
+            success = await page.evaluateInPage(script);
           }
           break;
 
         case 'custom':
           if (pattern.solution.customScript) {
-            success = await browserContext.page.evaluate(pattern.solution.customScript);
+            const page = await browserContext.getCurrentPage();
+            success = await page.evaluateInPage(pattern.solution.customScript);
           }
           break;
       }

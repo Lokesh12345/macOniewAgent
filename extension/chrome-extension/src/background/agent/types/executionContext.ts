@@ -54,9 +54,10 @@ export interface ExecutionContext {
 
 // Schema for LLM re-planning response
 export const replanningResponseSchema = z.object({
+  needsReplanning: z.boolean().describe('Whether re-planning is actually needed'),
   analysis: z.string().describe('Brief analysis of what changed and why re-planning is needed'),
   executionMode: z.enum(['batch', 'single-step', 'adaptive']).describe('Execution mode for remaining actions'),
-  updatedPlan: z.array(z.record(z.unknown())).describe('Updated action plan'),
+  updatedPlan: z.array(z.record(z.unknown())).describe('Updated action plan with correct indices and aria labels'),
   reasoning: z.string().describe('Reasoning for the chosen approach')
 });
 

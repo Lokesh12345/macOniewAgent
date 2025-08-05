@@ -7,11 +7,14 @@ import { IntelligentDOMDetector, IntelligentDOMAnalysis } from '../learning/inte
 import { LearningContext } from '../learning/domPatternLearner';
 import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 import { IntelligentWaiting } from '../actions/intelligentWaiting';
+import { IntelligentObstructionHandler } from '../obstruction/intelligentObstructionHandler';
+import { DOMChangeDetector } from '../utils/domChangeDetector';
 
 const logger = createLogger('LearningNavigator');
 
 export class LearningNavigator extends NavigatorAgent {
   private intelligentDetector: IntelligentDOMDetector;
+  private obstructionHandler: IntelligentObstructionHandler;
   private executionContext: ExecutionContext | null = null;
   private learningMode = true;
 
@@ -22,6 +25,10 @@ export class LearningNavigator extends NavigatorAgent {
   ) {
     super(actionRegistry, options, { ...extraOptions, id: 'learning-navigator' });
     this.intelligentDetector = new IntelligentDOMDetector();
+    this.obstructionHandler = new IntelligentObstructionHandler(
+      this['chatLLM'],
+      this.context.browserContext
+    );
   }
 
   /**
@@ -210,7 +217,7 @@ export class LearningNavigator extends NavigatorAgent {
         
         return null; // Continue with original plan
       } else {
-        logger.warn(`❌ Solution failed: ${solutionResult.description}`);
+        logger.warning(`❌ Solution failed: ${solutionResult.description}`);
       }
     }
 
@@ -218,7 +225,7 @@ export class LearningNavigator extends NavigatorAgent {
     // Decide based on change type
     switch (analysis.type) {
       case DOMChangeType.BLOCKING:
-        logger.warn('🚫 Blocking change detected - may need to skip remaining actions');
+        logger.warning('🚫 Blocking change detected - may need to skip remaining actions');
         return { skipRemaining: true };
         
       case DOMChangeType.INTERACTIVE:

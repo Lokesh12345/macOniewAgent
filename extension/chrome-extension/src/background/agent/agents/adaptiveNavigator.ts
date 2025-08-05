@@ -8,12 +8,16 @@ import { DOMChangeDetector, DOMChangeAnalysis } from '../utils/domChangeDetector
 import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 import { IntelligentWaiting } from '../actions/intelligentWaiting';
 import { convertZodToJsonSchema } from '@src/background/utils';
+import { IntelligentObstructionHandler } from '../obstruction/intelligentObstructionHandler';
+import { PredictiveObstructionDetector, PredictionContext } from '../learning/predictiveObstructionDetector';
 
 const logger = createLogger('AdaptiveNavigator');
 
 export class AdaptiveNavigatorAgent extends NavigatorAgent {
   private executionContext: ExecutionContext | null = null;
   private currentExecutionMode: ExecutionMode = ExecutionMode.ADAPTIVE;
+  private obstructionHandler: IntelligentObstructionHandler;
+  private predictiveDetector: PredictiveObstructionDetector;
 
   constructor(
     actionRegistry: NavigatorActionRegistry,
@@ -25,6 +29,17 @@ export class AdaptiveNavigatorAgent extends NavigatorAgent {
       options.prompt = new AdaptiveNavigatorPrompt(options.context?.options?.maxActionsPerStep || 10);
     }
     super(actionRegistry, options, { ...extraOptions, id: 'adaptive-navigator' });
+    
+    // Initialize intelligent obstruction handler
+    this.obstructionHandler = new IntelligentObstructionHandler(
+      this['chatLLM'], // Access the LLM from parent class
+      this.context.browserContext
+    );
+    
+    // Initialize predictive detector
+    this.predictiveDetector = new PredictiveObstructionDetector(
+      this.obstructionHandler['learner'] // Access the learner from obstruction handler
+    );
   }
 
   /**
@@ -137,6 +152,9 @@ export class AdaptiveNavigatorAgent extends NavigatorAgent {
     logger.info('🚶 Executing in single-step mode');
     const results: ActionResult[] = [];
 
+    // Get predictive analysis for upcoming actions
+    await this.performPredictiveAnalysis(actions);
+
     for (let i = 0; i < actions.length; i++) {
       const action = actions[i];
       const actionName = Object.keys(action)[0];
@@ -169,11 +187,63 @@ export class AdaptiveNavigatorAgent extends NavigatorAgent {
         if (domAnalysis.type !== DOMChangeType.NONE) {
           logger.info(`🔄 DOM change detected: ${domAnalysis.description}`);
           
-          // Handle the DOM change
-          const handled = await this.handleDOMChange(domAnalysis, actions.slice(i + 1));
+          // Use intelligent obstruction handler
+          const currentState = await this.context.browserContext.getState(this.context.options.useVision);
+          const obstructionResult = await this.obstructionHandler.handleObstruction(
+            domAnalysis,
+            this.executionContext!,
+            currentState,
+            action,
+            actions[i + 1] || {}
+          );
           
-          if (!handled) {
-            // Need re-planning
+          logger.info(`📊 Obstruction handling result: ${obstructionResult.handled} - ${obstructionResult.description}`);
+          
+          if (obstructionResult.handled) {
+            // Obstruction was resolved, continue with plan
+            if (obstructionResult.planAdjustments) {
+              logger.info(`📝 Plan adjustment needed: ${obstructionResult.planAdjustments}`);
+            }
+            
+            if (!obstructionResult.shouldContinueWithPlan) {
+              logger.info('🛑 Stopping execution as recommended by obstruction handler');
+              break;
+            }
+
+            // CRITICAL FIX: Re-analyze DOM and update remaining actions after obstruction resolution
+            if (i < actions.length - 1) { // Only if there are remaining actions
+              logger.info('🔄 Re-analyzing DOM state after obstruction resolution to update remaining actions');
+              
+              try {
+                // Get fresh DOM state
+                const freshState = await this.context.browserContext.getState();
+                
+                // Re-plan remaining actions with LLM using fresh state
+                const remainingActions = actions.slice(i + 1);
+                const replanResult = await this.replanWithLLMAndFreshState(
+                  `DOM changed after resolving ${domAnalysis.description}. Need to update element targeting for remaining actions.`,
+                  remainingActions, 
+                  freshState
+                );
+                
+                if (replanResult && replanResult.updatedPlan.length > 0) {
+                  logger.info(`✅ Successfully re-planned ${replanResult.updatedPlan.length} remaining actions with fresh DOM indices`);
+                  
+                  // Replace remaining actions with updated ones
+                  actions.splice(i + 1, remainingActions.length, ...replanResult.updatedPlan);
+                  
+                  logger.info('📋 Continuing execution with updated action plan');
+                } else {
+                  logger.warning('⚠️ Failed to re-plan remaining actions, continuing with original plan (may have stale indices)');
+                }
+              } catch (error) {
+                logger.error(`❌ Error during DOM re-analysis: ${error}. Continuing with original plan.`);
+              }
+            }
+          } else {
+            // Obstruction handling failed, try re-planning
+            logger.warning(`❌ Obstruction handling failed: ${obstructionResult.error}`);
+            
             const replanResult = await this.replanWithLLM(domAnalysis, actions.slice(i + 1));
             if (replanResult) {
               // Execute new plan
@@ -286,58 +356,82 @@ export class AdaptiveNavigatorAgent extends NavigatorAgent {
   }
 
   /**
-   * Handle DOM changes without LLM re-planning if possible
+   * Perform predictive analysis for upcoming actions
    */
-  private async handleDOMChange(analysis: DOMChangeAnalysis, remainingActions: Record<string, unknown>[]): Promise<boolean> {
-    logger.info(`🛠️ Attempting to handle ${analysis.type} DOM change automatically`);
+  private async performPredictiveAnalysis(actions: Record<string, unknown>[]): Promise<void> {
+    if (!this.executionContext) return;
 
-    switch (analysis.type) {
-      case DOMChangeType.INTERACTIVE:
-        // For autocomplete/dropdown, we might be able to continue
-        if (analysis.description.includes('autocomplete') || analysis.description.includes('dropdown')) {
-          // Wait for user to make selection or dropdown to close
-          const waitResult = await IntelligentWaiting.waitFor(this.context.browserContext, {
-            preset: 'stable',
-            maxWait: 3000
-          });
-          
-          if (waitResult.success) {
-            logger.info('✅ Dropdown/autocomplete handled by waiting');
-            return true;
-          }
-        }
-        break;
+    const currentState = await this.context.browserContext.getCachedState();
+    const predictionContext: PredictionContext = {
+      currentUrl: currentState?.url || '',
+      currentState,
+      plannedActions: actions,
+      executionContext: this.executionContext,
+      recentObstructions: this.executionContext.domChangeHistory.map(change => ({
+        type: change.changeType,
+        trigger: change.afterAction,
+        resolved: change.handled,
+        timestamp: Date.now() - 60000 // Approximation - would track actual timestamps
+      }))
+    };
 
-      case DOMChangeType.MINOR:
-        // For minor changes, usually safe to continue
-        logger.info('✅ Minor DOM change, continuing execution');
-        return true;
-
-      case DOMChangeType.BLOCKING:
-        // For modals/alerts, try to find and click close button
-        const closeActions = [
-          { click_element: { intent: 'Close modal', text: 'Close' } },
-          { click_element: { intent: 'Dismiss dialog', text: 'OK' } },
-          { click_element: { intent: 'Cancel dialog', text: 'Cancel' } },
-          { keyboard_press: { key: 'Escape' } }
-        ];
-
-        for (const closeAction of closeActions) {
-          try {
-            const result = await this.executeSingleAction(closeAction, -1);
-            if (!result.error) {
-              logger.info('✅ Successfully closed blocking element');
-              return true;
-            }
-          } catch (e) {
-            // Try next method
-          }
-        }
-        break;
+    const predictions = await this.predictiveDetector.predictUpcomingObstructions(predictionContext);
+    
+    if (predictions.length > 0) {
+      logger.info(`🔮 Predicted ${predictions.length} potential obstructions:`);
+      predictions.forEach(prediction => {
+        logger.info(`  • ${prediction.expectedType} (${Math.round(prediction.likelihood * 100)}% likelihood) - ${prediction.suggestedStrategy}`);
+      });
     }
+  }
 
-    logger.info('❌ Could not handle DOM change automatically, need LLM re-planning');
-    return false;
+  /**
+   * Check if obstruction should be handled before next action
+   */
+  private shouldHandleObstruction(domAnalysis: DOMChangeAnalysis, nextAction: Record<string, unknown>): boolean {
+    return this.obstructionHandler.shouldHandleObstruction(domAnalysis, nextAction);
+  }
+
+  /**
+   * Re-plan with LLM using fresh DOM state after obstruction resolution
+   */
+  private async replanWithLLMAndFreshState(
+    reason: string,
+    remainingActions: Record<string, unknown>[],
+    freshState: any
+  ): Promise<ReplanningResponse | null> {
+    logger.info('🔄 Requesting LLM re-planning with fresh DOM state');
+    
+    try {
+      // Build a prompt that includes the fresh DOM state
+      const prompt = this.buildFreshStateReplanningPrompt(reason, remainingActions, freshState);
+      
+      const messages = [
+        new SystemMessage('You are an adaptive web automation agent. The DOM has changed after resolving an obstruction. Re-analyze the current state and update the remaining actions with correct element indices.'),
+        new HumanMessage(prompt)
+      ];
+
+      // Use structured output for re-planning
+      const jsonSchema = convertZodToJsonSchema(replanningResponseSchema, 'ReplanningResponse', true);
+      const structuredLlm = this['chatLLM'].withStructuredOutput(jsonSchema, {
+        includeRaw: true,
+        name: 'replanning_response'
+      });
+
+      const response = await structuredLlm.invoke(messages);
+      
+      if (!response.parsed || response.parsed.needsReplanning === false) {
+        logger.info('🤷 LLM determined no re-planning needed');
+        return null;
+      }
+
+      logger.info(`✅ LLM re-planning successful: ${response.parsed.reasoning}`);
+      return response.parsed as ReplanningResponse;
+      
+    } catch (error) {
+      logger.error(`❌ LLM re-planning failed: ${error}`);
+      return null;
+    }
   }
 
   /**
@@ -379,6 +473,127 @@ export class AdaptiveNavigatorAgent extends NavigatorAgent {
     }
 
     return null;
+  }
+
+  /**
+   * Build re-planning prompt with fresh DOM state
+   */
+  private buildFreshStateReplanningPrompt(
+    reason: string,
+    remainingActions: Record<string, unknown>[],
+    freshState: any
+  ): string {
+    const context = this.executionContext!;
+    
+    // Extract element info for the prompt
+    const elementInfo = this.extractElementInfoForPrompt(freshState);
+    
+    return `
+## CONTEXT: DOM Re-analysis After Obstruction Resolution
+
+### What Happened
+${reason}
+
+### Original Goal  
+${context.originalGoal}
+
+### CRITICAL: Remaining Actions Need Updated Element Indices
+The following actions were planned with the OLD DOM state and are now BROKEN:
+
+${remainingActions.map((action, i) => {
+  const actionName = Object.keys(action)[0];
+  const actionArgs = action[actionName];
+  return `${i + 1}. ${actionName} - Args: ${JSON.stringify(actionArgs)}`;
+}).join('\n')}
+
+### CURRENT DOM STATE - AVAILABLE ELEMENTS
+**Use these EXACT indices and aria labels:**
+
+${elementInfo}
+
+## TASK: Fix the Broken Actions
+
+Return the EXACT same actions but with CORRECTED indices and aria labels from the current DOM state.
+
+**RESPONSE FORMAT REQUIRED:**
+{
+  "needsReplanning": true,
+  "analysis": "DOM changed, need to update element targeting",
+  "executionMode": "single-step", 
+  "updatedPlan": [
+    {
+      "input_text": {
+        "index": [CORRECT_SUBJECT_INDEX_FROM_ABOVE],
+        "aria": "[EXACT_SUBJECT_ARIA_LABEL_FROM_ABOVE]",
+        "text": "Leave Application"
+      }
+    },
+    {
+      "input_text": {
+        "index": [CORRECT_BODY_INDEX_FROM_ABOVE],
+        "aria": "[EXACT_BODY_ARIA_LABEL_FROM_ABOVE]", 
+        "text": "Dear Sir/Madam,\\n\\nI would like to request a leave of absence for 2 days starting from August 12.\\n\\nThank you for your understanding.\\n\\nBest regards,\\nP. Lokesh."
+      }
+    }
+  ],
+  "reasoning": "Updated indices and aria labels based on current DOM state"
+}
+
+**CRITICAL: Use ONLY the indices and aria labels listed in "CURRENT DOM STATE" above.**
+`;
+  }
+
+  /**
+   * Extract element information for the re-planning prompt
+   */
+  private extractElementInfoForPrompt(freshState: any): string {
+    if (!freshState || !freshState.selectorMap) {
+      return 'DOM state not available';
+    }
+
+    // Convert selectorMap to array and find relevant elements
+    const elements: string[] = [];
+    let index = 0;
+    
+    // Look for subject and message body related elements
+    const subjectKeywords = ['subject', 'title', 'Subject'];
+    const bodyKeywords = ['message', 'body', 'compose', 'text', 'Message Body', 'content'];
+    
+    try {
+      if (freshState.selectorMap && typeof freshState.selectorMap.forEach === 'function') {
+        freshState.selectorMap.forEach((element: any, selector: string) => {
+          const ariaLabel = element?.attributes?.['aria-label'] || '';
+          const placeholder = element?.attributes?.placeholder || '';
+          const tagName = element?.tagName?.toLowerCase() || '';
+          
+          // Check if this looks like a subject or body field
+          const isSubjectField = subjectKeywords.some(keyword => 
+            ariaLabel.toLowerCase().includes(keyword.toLowerCase()) ||
+            placeholder.toLowerCase().includes(keyword.toLowerCase())
+          );
+          
+          const isBodyField = bodyKeywords.some(keyword => 
+            ariaLabel.toLowerCase().includes(keyword.toLowerCase()) ||
+            placeholder.toLowerCase().includes(keyword.toLowerCase())
+          );
+          
+          if ((isSubjectField || isBodyField) && (tagName === 'input' || tagName === 'textarea' || tagName === 'div')) {
+            elements.push(`[${index}] ${tagName} - aria-label: "${ariaLabel}" - placeholder: "${placeholder}"`);
+          }
+          
+          index++;
+        });
+      }
+    } catch (error) {
+      // Fallback if selectorMap iteration fails
+      return `DOM state parsing error: ${error}. Total elements: ${freshState?.selectorMap?.size || 'unknown'}`;
+    }
+    
+    if (elements.length === 0) {
+      return `No subject/body fields found in ${freshState?.selectorMap?.size || 0} total elements`;
+    }
+    
+    return elements.join('\n');
   }
 
   /**

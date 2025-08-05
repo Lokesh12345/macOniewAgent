@@ -345,7 +345,7 @@ export class DynamicContentHandlers {
       }
 
       if (result.hasCustomPicker) {
-        logger.warn('Custom date picker detected - may need manual interaction');
+        logger.warning('Custom date picker detected - may need manual interaction');
         return new ActionResult({
           extractedContent: 'Custom date picker detected - requires manual interaction',
           includeInMemory: true

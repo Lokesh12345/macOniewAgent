@@ -53,7 +53,7 @@ export class EnhancedElementFinder {
             logger.info(`✅ INDEX VALIDATED: Element passes semantic validation`);
             return result;
           } else {
-            logger.warn(`⚠️ INDEX VALIDATION FAILED: Continuing to semantic fallback strategies`);
+            logger.warning(`⚠️ INDEX VALIDATION FAILED: Continuing to semantic fallback strategies`);
             // Don't return - continue to semantic fallback
           }
         } else {
@@ -62,7 +62,7 @@ export class EnhancedElementFinder {
           return result;
         }
       } else {
-        logger.warn(`❌ INDEX search failed: ${strategy.index} not found - falling back to semantic strategies`);
+        logger.warning(`❌ INDEX search failed: ${strategy.index} not found - falling back to semantic strategies`);
       }
     }
 
@@ -112,7 +112,7 @@ export class EnhancedElementFinder {
         const validated = this.validateSemanticMatch(result, strategy);
         if (validated) return validated;
       } else {
-        logger.warn(`❌ ATTRIBUTES search failed: ${JSON.stringify(strategy.attributes)} not found`);
+        logger.warning(`❌ ATTRIBUTES search failed: ${JSON.stringify(strategy.attributes)} not found`);
       }
     }
 
@@ -124,7 +124,7 @@ export class EnhancedElementFinder {
         logger.info(`✅ FOUND via TEXT: "${strategy.text}" → ${result.element.tagName}[${result.element.highlightIndex}] (confidence: ${result.confidence})`);
         return result;
       } else {
-        logger.warn(`❌ TEXT search failed: "${strategy.text}" not found`);
+        logger.warning(`❌ TEXT search failed: "${strategy.text}" not found`);
       }
     }
 
@@ -136,7 +136,7 @@ export class EnhancedElementFinder {
         logger.info(`✅ FOUND via SELECTOR: "${strategy.selector}" → ${result.element.tagName}[${result.element.highlightIndex}] (confidence: ${result.confidence})`);
         return result;
       } else {
-        logger.warn(`❌ SELECTOR search failed: "${strategy.selector}" not found`);
+        logger.warning(`❌ SELECTOR search failed: "${strategy.selector}" not found`);
       }
     }
 
@@ -148,7 +148,7 @@ export class EnhancedElementFinder {
         logger.info(`⚠️ FOUND via XPATH: "${strategy.xpath}" → ${result.element.tagName}[${result.element.highlightIndex}] (confidence: ${result.confidence})`);
         return result;
       } else {
-        logger.warn(`❌ XPATH search failed: "${strategy.xpath}" not found`);
+        logger.warning(`❌ XPATH search failed: "${strategy.xpath}" not found`);
       }
     }
 
@@ -377,8 +377,8 @@ export class EnhancedElementFinder {
           );
           
           if (!hasMatchingWords) {
-            logger.warn(`❌ SEMANTIC MISMATCH: Element has semantic info "${elementSemantics.join(', ')}" but we want "${targetAria}"`);
-            logger.warn(`   - Rejecting fallback element as it appears to be for different purpose`);
+            logger.warning(`❌ SEMANTIC MISMATCH: Element has semantic info "${elementSemantics.join(', ')}" but we want "${targetAria}"`);
+            logger.warning(`   - Rejecting fallback element as it appears to be for different purpose`);
             return null; // Reject this match
           } else {
             logger.info(`✅ SEMANTIC COMPATIBLE: Found some matching words between target and element semantics`);
@@ -434,7 +434,7 @@ export class EnhancedElementFinder {
       const elementIsEmail = elementAria.includes('to') || elementAria.includes('recipient');
       
       if ((targetIsEmail && elementIsSubject) || (targetIsSubject && elementIsEmail)) {
-        logger.warn(`❌ CLEAR SEMANTIC MISMATCH: Want "${targetAria}" but element is "${elementAria}"`);
+        logger.warning(`❌ CLEAR SEMANTIC MISMATCH: Want "${targetAria}" but element is "${elementAria}"`);
         return false;
       }
     }

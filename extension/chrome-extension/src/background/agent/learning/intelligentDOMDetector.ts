@@ -147,7 +147,8 @@ export class IntelligentDOMDetector {
             break;
 
           case 'escape':
-            await browserContext.page.keyboard.press('Escape');
+            const page = await browserContext.getCurrentPage();
+            await page.sendKeys('Escape');
             success = await this.verifyElementsGone(browserContext, ['[role="dialog"]', '.modal', '.dropdown']);
             description = success ? 'Elements dismissed with Escape' : 'Escape did not dismiss elements';
             break;
@@ -171,7 +172,7 @@ export class IntelligentDOMDetector {
           return { success: true, description };
         }
       } catch (error) {
-        logger.warn(`Solution failed with error: ${error}`);
+        logger.warning(`Solution failed with error: ${error}`);
       }
     }
 
@@ -289,15 +290,17 @@ export class IntelligentDOMDetector {
 
   private async verifyDOMStabilized(browserContext: any): Promise<boolean> {
     // Check if DOM stopped changing
-    const before = await browserContext.page.evaluate(() => document.body.children.length);
+    const page = await browserContext.getCurrentPage();
+    const before = await page.evaluateInPage(() => document.body.children.length);
     await new Promise(resolve => setTimeout(resolve, 500));
-    const after = await browserContext.page.evaluate(() => document.body.children.length);
+    const after = await page.evaluateInPage(() => document.body.children.length);
     return before === after;
   }
 
   private async safeClick(browserContext: any, selector: string): Promise<boolean> {
     try {
-      const result = await browserContext.page.evaluate((sel) => {
+      const page = await browserContext.getCurrentPage();
+      const result = await page.evaluateInPage((sel) => {
         const element = document.querySelector(sel);
         if (element && element.offsetParent !== null) {
           element.click();
@@ -313,7 +316,8 @@ export class IntelligentDOMDetector {
 
   private async verifyElementsGone(browserContext: any, selectors: string[]): Promise<boolean> {
     try {
-      const result = await browserContext.page.evaluate((sels) => {
+      const page = await browserContext.getCurrentPage();
+      const result = await page.evaluateInPage((sels) => {
         return sels.every(sel => {
           const elements = document.querySelectorAll(sel);
           return elements.length === 0 || Array.from(elements).every(el => el.offsetParent === null);
@@ -327,7 +331,8 @@ export class IntelligentDOMDetector {
 
   private async selectFromDropdown(browserContext: any, selector: string): Promise<boolean> {
     try {
-      const result = await browserContext.page.evaluate((sel) => {
+      const page = await browserContext.getCurrentPage();
+      const result = await page.evaluateInPage((sel) => {
         const dropdown = document.querySelector(sel);
         if (dropdown && dropdown.children.length > 0) {
           const firstOption = dropdown.children[0] as HTMLElement;

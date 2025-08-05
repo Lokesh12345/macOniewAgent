@@ -38,7 +38,7 @@ export class NavigatorFactory {
         return new LearningNavigator(actionRegistry, options, extraOptions);
       
       default:
-        logger.warn(`Unknown navigator mode: ${mode}, defaulting to legacy`);
+        logger.warning(`Unknown navigator mode: ${mode}, defaulting to legacy`);
         return new NavigatorAgent(actionRegistry, options, extraOptions);
     }
   }
@@ -47,8 +47,37 @@ export class NavigatorFactory {
    * Determine the best navigator mode based on the task and environment
    */
   static determineMode(task: string, url?: string): NavigatorMode {
-    // For now, always use legacy until adaptive is fully tested
-    logger.info('Using legacy navigator for stability');
-    return NavigatorMode.LEGACY;
+    logger.info('Determining navigator mode for intelligent obstruction handling');
+    
+    // Use adaptive mode for dynamic sites that commonly have obstructions
+    if (url) {
+      const urlLower = url.toLowerCase();
+      const dynamicSites = [
+        'gmail.com', 'outlook.com', 'calendar.google.com',
+        'facebook.com', 'twitter.com', 'linkedin.com',
+        'forms.google.com', 'checkout', 'cart', 'payment'
+      ];
+      
+      if (dynamicSites.some(site => urlLower.includes(site))) {
+        logger.info(`Using ADAPTIVE navigator for dynamic site: ${url}`);
+        return NavigatorMode.ADAPTIVE;
+      }
+    }
+    
+    // Check task complexity
+    const taskLower = task.toLowerCase();
+    const complexTasks = [
+      'compose', 'send', 'fill', 'form', 'submit', 'checkout', 
+      'login', 'signup', 'search', 'select', 'choose'
+    ];
+    
+    if (complexTasks.some(keyword => taskLower.includes(keyword))) {
+      logger.info(`Using ADAPTIVE navigator for complex task: ${task}`);
+      return NavigatorMode.ADAPTIVE;
+    }
+    
+    // Default to adaptive mode - our system is now production ready
+    logger.info('Using ADAPTIVE navigator (default for intelligent obstruction handling)');
+    return NavigatorMode.ADAPTIVE;
   }
 }

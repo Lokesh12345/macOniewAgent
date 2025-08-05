@@ -91,7 +91,7 @@ export class SemanticElementFinder {
       };
     }
 
-    logger.warn('No matching element found for criteria:', criteria);
+    logger.warning('No matching element found for criteria:', criteria);
     return null;
   }
 
