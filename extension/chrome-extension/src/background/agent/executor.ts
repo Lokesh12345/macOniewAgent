@@ -1,6 +1,7 @@
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { type ActionResult, AgentContext, type AgentOptions } from './types';
 import { NavigatorAgent, NavigatorActionRegistry } from './agents/navigator';
+import { NavigatorFactory, NavigatorMode } from './agents/navigatorFactory';
 import { PlannerAgent, type PlannerOutput } from './agents/planner';
 import { ValidatorAgent } from './agents/validator';
 import { NavigatorPrompt } from './prompts/navigator';
@@ -77,11 +78,20 @@ export class Executor {
     const navigatorActionRegistry = new NavigatorActionRegistry(actionBuilder.buildDefaultActions());
 
     // Initialize agents with their respective prompts
-    this.navigator = new NavigatorAgent(navigatorActionRegistry, {
-      chatLLM: navigatorLLM,
-      context: context,
-      prompt: this.navigatorPrompt,
-    });
+    // Determine navigator mode based on task and current URL
+    const currentUrl = browserContext.page?.url() || '';
+    const navigatorMode = NavigatorFactory.determineMode(task, currentUrl);
+    
+    this.navigator = NavigatorFactory.create(
+      navigatorActionRegistry,
+      {
+        chatLLM: navigatorLLM,
+        context: context,
+        prompt: this.navigatorPrompt,
+      },
+      undefined,
+      navigatorMode
+    );
 
     this.planner = new PlannerAgent({
       chatLLM: plannerLLM,

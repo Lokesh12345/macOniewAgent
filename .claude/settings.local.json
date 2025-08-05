@@ -29,7 +29,8 @@
       "Bash(npm run build:*)",
       "Bash(pnpm type-check:*)",
       "Bash(npx tsc:*)",
-      "Bash(pnpm run:*)"
+      "Bash(pnpm run:*)",
+      "WebFetch(domain:arxiv.org)"
     ],
     "deny": []
   }
