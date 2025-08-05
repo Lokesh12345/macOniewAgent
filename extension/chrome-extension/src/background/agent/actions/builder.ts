@@ -412,7 +412,7 @@ export class ActionBuilder {
           this.context
         );
 
-        // Define the input action with error recovery
+        // Simple input action with minimal click-first logic for Gmail combobox only
         const executeInputAction = async (): Promise<ActionResult> => {
           const page = await this.context.browserContext.getCurrentPage();
           const state = await this.context.browserContext.getState();
@@ -449,8 +449,49 @@ export class ActionBuilder {
             throw new Error(`Input element not found using any strategy. Index: ${input.index}, aria: "${input.aria}", placeholder: "${input.placeholder}"`);
           }
 
+          // 🎯 SIMPLE CLICK-FIRST: Only for Gmail combobox (To/CC/BCC fields)
+          const role = elementNode.attributes?.role;
+          const isGmailCombobox = role === 'combobox' && 
+            (elementNode.attributes?.['aria-label']?.includes('recipients') || 
+             elementNode.attributes?.['aria-label']?.includes('To') ||
+             elementNode.attributes?.['aria-label']?.includes('Cc') ||
+             elementNode.attributes?.['aria-label']?.includes('Bcc'));
+
+          if (isGmailCombobox) {
+            logger.info(`🔄 Gmail combobox detected, using click-first for: ${elementNode.attributes?.['aria-label']}`);
+            
+            // Click to activate
+            await page.clickElementNode(this.context.options.useVision, elementNode);
+            
+            // Brief wait for activation
+            await new Promise(resolve => setTimeout(resolve, 300));
+            
+            // Get fresh state to find activated input
+            const newState = await this.context.browserContext.getState();
+            const inputElements = Array.from(newState.selectorMap.values()).filter(node => 
+              node.tagName?.toLowerCase() === 'input' && 
+              node.attributes?.type === 'text' && 
+              node.isVisible
+            );
+            
+            if (inputElements.length > 0) {
+              // Use the most recently added input (highest index)
+              const activatedInput = inputElements.reduce((latest, current) => 
+                (current.highlightIndex || 0) > (latest.highlightIndex || 0) ? current : latest
+              );
+              
+              logger.info(`✅ Using activated input: ${activatedInput.tagName}[${activatedInput.highlightIndex}]`);
+              await page.inputTextElementNode(this.context.options.useVision, activatedInput, input.text);
+              const msg = `Activated Gmail field and input "${input.text}"`;
+              this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_OK, msg);
+              return new ActionResult({ extractedContent: msg, includeInMemory: true });
+            }
+          }
+
+          // Default: Direct input for all other elements
+          logger.info(`✅ Direct input into: ${elementNode.tagName}[${elementNode.highlightIndex}]`);
           await page.inputTextElementNode(this.context.options.useVision, elementNode, input.text);
-          const msg = `Input "${input.text}" into element with index ${input.index}`;
+          const msg = `Input "${input.text}" into ${elementNode.tagName} with index ${input.index}`;
           this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_OK, msg);
           return new ActionResult({ extractedContent: msg, includeInMemory: true });
         };

@@ -275,6 +275,244 @@ chrome.runtime.onConnect.addListener(port => {
       currentPort = null;
       currentExecutor?.cancel();
     });
+  } else if (port.name === 'dom-analyzer') {
+    // Handle DOM Analyzer connections
+    port.onMessage.addListener(async message => {
+      try {
+        if (message.type === 'execute_action') {
+          const { action, params } = message;
+          
+          // Get active tab
+          const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+          if (!activeTab || !activeTab.id) {
+            return port.postMessage({ 
+              type: 'action_result', 
+              success: false, 
+              error: 'No active tab found' 
+            });
+          }
+
+          // Create a minimal executor for the action
+          try {
+            // Ensure page is attached
+            const page = await browserContext.switchTab(activeTab.id);
+            
+            // Handle special mouse event testing actions
+            if (action.startsWith('mouse_') || action === 'focus_click' || action === 'pointer_event') {
+              // Execute mouse events directly on the page
+              const result = await chrome.scripting.executeScript({
+                target: { tabId: activeTab.id },
+                func: (actionType: string, elementIndex: number) => {
+                  try {
+                    // Find element by index using the DOM tree
+                    const elements = document.querySelectorAll('[data-highlight-index]');
+                    let targetElement: Element | null = null;
+                    
+                    for (const el of elements) {
+                      if (el.getAttribute('data-highlight-index') === String(elementIndex)) {
+                        targetElement = el;
+                        break;
+                      }
+                    }
+                    
+                    if (!targetElement) {
+                      // Fallback: try to find by the highlight overlay
+                      const highlights = document.querySelectorAll('.playwright-highlight');
+                      for (const highlight of highlights) {
+                        if (highlight.textContent?.includes(`[${elementIndex}]`)) {
+                          // Get the actual element behind the highlight
+                          const rect = highlight.getBoundingClientRect();
+                          const actualElement = document.elementFromPoint(
+                            rect.left + rect.width / 2,
+                            rect.top + rect.height / 2
+                          );
+                          if (actualElement && actualElement !== highlight) {
+                            targetElement = actualElement;
+                            break;
+                          }
+                        }
+                      }
+                    }
+                    
+                    if (!targetElement) {
+                      return { success: false, error: `Element with index ${elementIndex} not found` };
+                    }
+                    
+                    switch (actionType) {
+                      case 'mouse_click':
+                        // Simple synthetic click
+                        (targetElement as HTMLElement).click();
+                        return { success: true, result: 'Synthetic click executed' };
+                      
+                      case 'mouse_event':
+                        // Dispatch MouseEvent
+                        const clickEvent = new MouseEvent('click', {
+                          bubbles: true,
+                          cancelable: true,
+                          view: window,
+                          detail: 1,
+                          screenX: 0,
+                          screenY: 0,
+                          clientX: 0,
+                          clientY: 0,
+                          button: 0,
+                          buttons: 1,
+                        });
+                        targetElement.dispatchEvent(clickEvent);
+                        return { success: true, result: 'Mouse event dispatched' };
+                      
+                      case 'mouse_sequence':
+                        // Full mouse sequence
+                        const mouseDown = new MouseEvent('mousedown', {
+                          bubbles: true,
+                          cancelable: true,
+                          view: window,
+                          button: 0,
+                          buttons: 1,
+                        });
+                        const mouseUp = new MouseEvent('mouseup', {
+                          bubbles: true,
+                          cancelable: true,
+                          view: window,
+                          button: 0,
+                          buttons: 0,
+                        });
+                        const click = new MouseEvent('click', {
+                          bubbles: true,
+                          cancelable: true,
+                          view: window,
+                          button: 0,
+                        });
+                        
+                        targetElement.dispatchEvent(mouseDown);
+                        targetElement.dispatchEvent(mouseUp);
+                        targetElement.dispatchEvent(click);
+                        return { success: true, result: 'Mouse down+up+click sequence executed' };
+                      
+                      case 'focus_click':
+                        // Focus then click
+                        if (targetElement instanceof HTMLElement) {
+                          targetElement.focus();
+                          setTimeout(() => targetElement.click(), 50);
+                          return { success: true, result: 'Focus + click executed' };
+                        }
+                        return { success: false, error: 'Element is not focusable' };
+                      
+                      case 'pointer_event':
+                        // Modern pointer event
+                        const pointerDown = new PointerEvent('pointerdown', {
+                          bubbles: true,
+                          cancelable: true,
+                          view: window,
+                          pointerId: 1,
+                          pointerType: 'mouse',
+                          button: 0,
+                          buttons: 1,
+                        });
+                        const pointerUp = new PointerEvent('pointerup', {
+                          bubbles: true,
+                          cancelable: true,
+                          view: window,
+                          pointerId: 1,
+                          pointerType: 'mouse',
+                          button: 0,
+                          buttons: 0,
+                        });
+                        const pointerClick = new PointerEvent('click', {
+                          bubbles: true,
+                          cancelable: true,
+                          view: window,
+                          pointerId: 1,
+                          pointerType: 'mouse',
+                          button: 0,
+                        });
+                        
+                        targetElement.dispatchEvent(pointerDown);
+                        targetElement.dispatchEvent(pointerUp);
+                        targetElement.dispatchEvent(pointerClick);
+                        return { success: true, result: 'Pointer events executed' };
+                      
+                      default:
+                        return { success: false, error: 'Unknown action type' };
+                    }
+                  } catch (error) {
+                    return { success: false, error: error instanceof Error ? error.message : 'Failed to execute' };
+                  }
+                },
+                args: [action, params.index || 0],
+              });
+              
+              const execResult = result[0]?.result;
+              port.postMessage({ 
+                type: 'action_result', 
+                success: execResult?.success || false,
+                result: execResult?.result || execResult?.error || 'Unknown error'
+              });
+              return;
+            }
+            
+            // Regular action handling (existing code)
+            const providers = await llmProviderStore.getAllProviders();
+            const agentModels = await agentModelStore.getAllAgentModels();
+            const navigatorModel = agentModels[AgentNameEnum.Navigator];
+            
+            if (!navigatorModel || !providers[navigatorModel.provider]) {
+              throw new Error('Navigator model not configured');
+            }
+            
+            const navigatorLLM = createChatModel(providers[navigatorModel.provider], navigatorModel);
+            
+            // Import action builder and navigator
+            const { ActionBuilder } = await import('./agent/actions/builder');
+            const { NavigatorActionRegistry } = await import('./agent/agents/navigator');
+            
+            // Create minimal context for action execution
+            const minimalContext = {
+              browserContext,
+              emitEvent: () => {}, // No-op for DOM analyzer
+              options: { useVision: false },
+            };
+            
+            // Build actions
+            const actionBuilder = new ActionBuilder(minimalContext as any, navigatorLLM);
+            const actions = actionBuilder.buildDefaultActions();
+            const actionRegistry = new NavigatorActionRegistry(actions);
+            
+            // Find and execute the action
+            const actionInstance = actionRegistry.getAction(action);
+            if (!actionInstance) {
+              throw new Error(`Action ${action} not found`);
+            }
+            
+            // Execute the action
+            const result = await actionInstance.call(params);
+            
+            port.postMessage({ 
+              type: 'action_result', 
+              success: !result.error,
+              result: result.extractedContent || result.error || 'Action completed'
+            });
+          } catch (error) {
+            port.postMessage({ 
+              type: 'action_result', 
+              success: false, 
+              error: error instanceof Error ? error.message : 'Failed to execute action' 
+            });
+          }
+        }
+      } catch (error) {
+        console.error('Error handling DOM analyzer message:', error);
+        port.postMessage({
+          type: 'action_result',
+          success: false,
+          error: error instanceof Error ? error.message : 'Unknown error',
+        });
+      }
+    });
+    
+    port.onDisconnect.addListener(() => {
+      console.log('DOM Analyzer disconnected');
+    });
   }
 });
 

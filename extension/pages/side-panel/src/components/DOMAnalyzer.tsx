@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { MdSearch, MdRefresh, MdVisibility, MdVisibilityOff, MdClear } from 'react-icons/md';
+import { MdSearch, MdRefresh, MdVisibility, MdVisibilityOff, MdClear, MdPlayArrow } from 'react-icons/md';
 
 interface DOMElement {
   highlightIndex: number | null;
@@ -25,6 +25,9 @@ const DOMAnalyzer: React.FC<DOMAnalyzerProps> = ({ isDarkMode }) => {
   const [showHighlights, setShowHighlights] = useState(true);
   const [selectedElement, setSelectedElement] = useState<DOMElement | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [selectedAction, setSelectedAction] = useState<string>('');
+  const [actionParams, setActionParams] = useState<Record<string, any>>({});
+  const [isExecuting, setIsExecuting] = useState(false);
 
   // Analyze DOM elements using existing system
   const analyzeDom = useCallback(async () => {
@@ -209,6 +212,303 @@ const DOMAnalyzer: React.FC<DOMAnalyzerProps> = ({ isDarkMode }) => {
     analyzeDom();
   }, [analyzeDom]);
 
+  // Render action parameter inputs based on selected action
+  const renderActionParams = useCallback(() => {
+    switch (selectedAction) {
+      case 'input_text':
+        return (
+          <div className="space-y-2">
+            <input
+              type="text"
+              placeholder="Text to input"
+              value={actionParams.text || ''}
+              onChange={(e) => setActionParams({ ...actionParams, text: e.target.value })}
+              className={`w-full px-3 py-1 rounded-md border text-sm ${
+                isDarkMode
+                  ? 'bg-slate-800 border-sky-700 text-sky-200 placeholder-sky-400'
+                  : 'bg-white border-sky-300 text-gray-800 placeholder-gray-500'
+              } focus:outline-none focus:ring-1 focus:ring-sky-500`}
+            />
+            <input
+              type="text"
+              placeholder="Intent (optional)"
+              value={actionParams.intent || ''}
+              onChange={(e) => setActionParams({ ...actionParams, intent: e.target.value })}
+              className={`w-full px-3 py-1 rounded-md border text-sm ${
+                isDarkMode
+                  ? 'bg-slate-800 border-sky-700 text-sky-200 placeholder-sky-400'
+                  : 'bg-white border-sky-300 text-gray-800 placeholder-gray-500'
+              } focus:outline-none focus:ring-1 focus:ring-sky-500`}
+            />
+          </div>
+        );
+      
+      case 'select_dropdown_option':
+        return (
+          <div className="space-y-2">
+            <input
+              type="text"
+              placeholder="Option text to select"
+              value={actionParams.text || ''}
+              onChange={(e) => setActionParams({ ...actionParams, text: e.target.value })}
+              className={`w-full px-3 py-1 rounded-md border text-sm ${
+                isDarkMode
+                  ? 'bg-slate-800 border-sky-700 text-sky-200 placeholder-sky-400'
+                  : 'bg-white border-sky-300 text-gray-800 placeholder-gray-500'
+              } focus:outline-none focus:ring-1 focus:ring-sky-500`}
+            />
+          </div>
+        );
+      
+      case 'scroll_to_percent':
+        return (
+          <div className="space-y-2">
+            <input
+              type="number"
+              placeholder="Y Percent (0-100)"
+              min="0"
+              max="100"
+              value={actionParams.yPercent || ''}
+              onChange={(e) => setActionParams({ ...actionParams, yPercent: parseInt(e.target.value) })}
+              className={`w-full px-3 py-1 rounded-md border text-sm ${
+                isDarkMode
+                  ? 'bg-slate-800 border-sky-700 text-sky-200 placeholder-sky-400'
+                  : 'bg-white border-sky-300 text-gray-800 placeholder-gray-500'
+              } focus:outline-none focus:ring-1 focus:ring-sky-500`}
+            />
+          </div>
+        );
+      
+      case 'scroll_to_text':
+        return (
+          <div className="space-y-2">
+            <input
+              type="text"
+              placeholder="Text to scroll to"
+              value={actionParams.text || ''}
+              onChange={(e) => setActionParams({ ...actionParams, text: e.target.value })}
+              className={`w-full px-3 py-1 rounded-md border text-sm ${
+                isDarkMode
+                  ? 'bg-slate-800 border-sky-700 text-sky-200 placeholder-sky-400'
+                  : 'bg-white border-sky-300 text-gray-800 placeholder-gray-500'
+              } focus:outline-none focus:ring-1 focus:ring-sky-500`}
+            />
+            <input
+              type="number"
+              placeholder="Nth occurrence (default: 1)"
+              min="1"
+              value={actionParams.nth || ''}
+              onChange={(e) => setActionParams({ ...actionParams, nth: parseInt(e.target.value) })}
+              className={`w-full px-3 py-1 rounded-md border text-sm ${
+                isDarkMode
+                  ? 'bg-slate-800 border-sky-700 text-sky-200 placeholder-sky-400'
+                  : 'bg-white border-sky-300 text-gray-800 placeholder-gray-500'
+              } focus:outline-none focus:ring-1 focus:ring-sky-500`}
+            />
+          </div>
+        );
+      
+      case 'go_to_url':
+      case 'open_tab':
+        return (
+          <div className="space-y-2">
+            <input
+              type="text"
+              placeholder="URL"
+              value={actionParams.url || ''}
+              onChange={(e) => setActionParams({ ...actionParams, url: e.target.value })}
+              className={`w-full px-3 py-1 rounded-md border text-sm ${
+                isDarkMode
+                  ? 'bg-slate-800 border-sky-700 text-sky-200 placeholder-sky-400'
+                  : 'bg-white border-sky-300 text-gray-800 placeholder-gray-500'
+              } focus:outline-none focus:ring-1 focus:ring-sky-500`}
+            />
+          </div>
+        );
+      
+      case 'search_google':
+        return (
+          <div className="space-y-2">
+            <input
+              type="text"
+              placeholder="Search query"
+              value={actionParams.query || ''}
+              onChange={(e) => setActionParams({ ...actionParams, query: e.target.value })}
+              className={`w-full px-3 py-1 rounded-md border text-sm ${
+                isDarkMode
+                  ? 'bg-slate-800 border-sky-700 text-sky-200 placeholder-sky-400'
+                  : 'bg-white border-sky-300 text-gray-800 placeholder-gray-500'
+              } focus:outline-none focus:ring-1 focus:ring-sky-500`}
+            />
+          </div>
+        );
+      
+      case 'switch_tab':
+      case 'close_tab':
+        return (
+          <div className="space-y-2">
+            <input
+              type="number"
+              placeholder="Tab ID"
+              value={actionParams.tab_id || ''}
+              onChange={(e) => setActionParams({ ...actionParams, tab_id: parseInt(e.target.value) })}
+              className={`w-full px-3 py-1 rounded-md border text-sm ${
+                isDarkMode
+                  ? 'bg-slate-800 border-sky-700 text-sky-200 placeholder-sky-400'
+                  : 'bg-white border-sky-300 text-gray-800 placeholder-gray-500'
+              } focus:outline-none focus:ring-1 focus:ring-sky-500`}
+            />
+          </div>
+        );
+      
+      case 'send_keys':
+        return (
+          <div className="space-y-2">
+            <input
+              type="text"
+              placeholder="Keys to send (e.g., Tab, Enter, Escape)"
+              value={actionParams.keys || ''}
+              onChange={(e) => setActionParams({ ...actionParams, keys: e.target.value })}
+              className={`w-full px-3 py-1 rounded-md border text-sm ${
+                isDarkMode
+                  ? 'bg-slate-800 border-sky-700 text-sky-200 placeholder-sky-400'
+                  : 'bg-white border-sky-300 text-gray-800 placeholder-gray-500'
+              } focus:outline-none focus:ring-1 focus:ring-sky-500`}
+            />
+          </div>
+        );
+      
+      case 'wait':
+        return (
+          <div className="space-y-2">
+            <input
+              type="number"
+              placeholder="Seconds to wait"
+              min="1"
+              value={actionParams.seconds || ''}
+              onChange={(e) => setActionParams({ ...actionParams, seconds: parseInt(e.target.value) })}
+              className={`w-full px-3 py-1 rounded-md border text-sm ${
+                isDarkMode
+                  ? 'bg-slate-800 border-sky-700 text-sky-200 placeholder-sky-400'
+                  : 'bg-white border-sky-300 text-gray-800 placeholder-gray-500'
+              } focus:outline-none focus:ring-1 focus:ring-sky-500`}
+            />
+          </div>
+        );
+      
+      case 'cache_content':
+        return (
+          <div className="space-y-2">
+            <textarea
+              placeholder="Content to cache"
+              value={actionParams.content || ''}
+              onChange={(e) => setActionParams({ ...actionParams, content: e.target.value })}
+              rows={3}
+              className={`w-full px-3 py-1 rounded-md border text-sm ${
+                isDarkMode
+                  ? 'bg-slate-800 border-sky-700 text-sky-200 placeholder-sky-400'
+                  : 'bg-white border-sky-300 text-gray-800 placeholder-gray-500'
+              } focus:outline-none focus:ring-1 focus:ring-sky-500`}
+            />
+          </div>
+        );
+      
+      case 'done':
+        return (
+          <div className="space-y-2">
+            <textarea
+              placeholder="Completion message"
+              value={actionParams.text || ''}
+              onChange={(e) => setActionParams({ ...actionParams, text: e.target.value })}
+              rows={2}
+              className={`w-full px-3 py-1 rounded-md border text-sm ${
+                isDarkMode
+                  ? 'bg-slate-800 border-sky-700 text-sky-200 placeholder-sky-400'
+                  : 'bg-white border-sky-300 text-gray-800 placeholder-gray-500'
+              } focus:outline-none focus:ring-1 focus:ring-sky-500`}
+            />
+            <label className={`flex items-center gap-2 text-sm ${isDarkMode ? 'text-sky-300' : 'text-gray-600'}`}>
+              <input
+                type="checkbox"
+                checked={actionParams.success !== false}
+                onChange={(e) => setActionParams({ ...actionParams, success: e.target.checked })}
+                className="rounded"
+              />
+              Success
+            </label>
+          </div>
+        );
+      
+      // Actions that only need index (already set)
+      case 'click_element':
+      case 'get_dropdown_options':
+      case 'go_back':
+      case 'go_forward':
+      case 'refresh':
+      case 'scroll_to_top':
+      case 'scroll_to_bottom':
+      case 'previous_page':
+      case 'next_page':
+      case 'mouse_click':
+      case 'mouse_event':
+      case 'mouse_sequence':
+      case 'focus_click':
+      case 'pointer_event':
+        return (
+          <div className={`text-sm ${isDarkMode ? 'text-sky-400' : 'text-sky-600'}`}>
+            No additional parameters needed
+          </div>
+        );
+      
+      default:
+        return null;
+    }
+  }, [selectedAction, actionParams, isDarkMode]);
+
+  // Execute the selected action
+  const executeAction = useCallback(async () => {
+    if (!selectedAction) return;
+    
+    setIsExecuting(true);
+    setError(null);
+    
+    try {
+      // Send message to background script to execute action
+      const port = chrome.runtime.connect({ name: 'dom-analyzer' });
+      
+      port.postMessage({
+        type: 'execute_action',
+        action: selectedAction,
+        params: actionParams
+      });
+      
+      // Listen for response
+      port.onMessage.addListener((response) => {
+        if (response.type === 'action_result') {
+          if (response.success) {
+            // Refresh DOM after action
+            analyzeDom();
+          } else {
+            setError(response.error || 'Action failed');
+          }
+          setIsExecuting(false);
+          port.disconnect();
+        }
+      });
+      
+      // Timeout after 10 seconds
+      setTimeout(() => {
+        setIsExecuting(false);
+        setError('Action timed out');
+        port.disconnect();
+      }, 10000);
+      
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to execute action');
+      setIsExecuting(false);
+    }
+  }, [selectedAction, actionParams, analyzeDom]);
+
   const getStatusIcon = (element: DOMElement) => {
     if (!element.isVisible) return '👻'; // Hidden
     if (!element.isInteractive) return '📄'; // Static
@@ -300,7 +600,7 @@ const DOMAnalyzer: React.FC<DOMAnalyzerProps> = ({ isDarkMode }) => {
         </div>
       </div>
 
-      {/* Error */}
+      {/* Error or Executing Status */}
       {error && (
         <div className={`p-4 border-l-4 ${
           isDarkMode 
@@ -308,6 +608,19 @@ const DOMAnalyzer: React.FC<DOMAnalyzerProps> = ({ isDarkMode }) => {
             : 'bg-red-50 border-red-400 text-red-700'
         }`}>
           <p>{error}</p>
+        </div>
+      )}
+      
+      {isExecuting && (
+        <div className={`p-4 border-l-4 ${
+          isDarkMode 
+            ? 'bg-blue-900/20 border-blue-500 text-blue-300' 
+            : 'bg-blue-50 border-blue-400 text-blue-700'
+        }`}>
+          <p className="flex items-center gap-2">
+            <span className="animate-spin">⏳</span>
+            Executing {selectedAction}...
+          </p>
         </div>
       )}
 
@@ -409,9 +722,100 @@ const DOMAnalyzer: React.FC<DOMAnalyzerProps> = ({ isDarkMode }) => {
       {/* Selected Element Details */}
       {selectedElement && (
         <div className={`border-t p-4 ${isDarkMode ? 'border-sky-800 bg-slate-800' : 'border-sky-200 bg-gray-50'}`}>
-          <h3 className={`font-semibold mb-2 ${isDarkMode ? 'text-sky-200' : 'text-sky-700'}`}>
-            Element Details
-          </h3>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className={`font-semibold ${isDarkMode ? 'text-sky-200' : 'text-sky-700'}`}>
+              Element Details
+            </h3>
+            
+            {/* Action Dropdown */}
+            <div className="flex items-center gap-2">
+              <select
+                value={selectedAction}
+                onChange={(e) => {
+                  setSelectedAction(e.target.value);
+                  // Set default params based on action
+                  if (e.target.value && selectedElement.highlightIndex !== null) {
+                    setActionParams({ index: selectedElement.highlightIndex });
+                  }
+                }}
+                className={`px-3 py-1 rounded-md border text-sm ${
+                  isDarkMode
+                    ? 'bg-slate-700 border-sky-700 text-sky-200'
+                    : 'bg-white border-sky-300 text-gray-700'
+                } focus:outline-none focus:ring-1 focus:ring-sky-500`}
+              >
+                <option value="">Select Action</option>
+                <optgroup label="Element Actions">
+                  <option value="click_element">Click Element</option>
+                  <option value="input_text">Input Text</option>
+                  <option value="get_dropdown_options">Get Dropdown Options</option>
+                  <option value="select_dropdown_option">Select Dropdown Option</option>
+                </optgroup>
+                <optgroup label="Mouse Events (Testing)">
+                  <option value="mouse_click">Mouse Click (Synthetic)</option>
+                  <option value="mouse_event">Mouse Event (Dispatched)</option>
+                  <option value="mouse_sequence">Mouse Down+Up+Click</option>
+                  <option value="focus_click">Focus + Click</option>
+                  <option value="pointer_event">Pointer Event</option>
+                </optgroup>
+                <optgroup label="Scroll Actions">
+                  <option value="scroll_to_percent">Scroll to Percent</option>
+                  <option value="scroll_to_top">Scroll to Top</option>
+                  <option value="scroll_to_bottom">Scroll to Bottom</option>
+                  <option value="previous_page">Previous Page</option>
+                  <option value="next_page">Next Page</option>
+                  <option value="scroll_to_text">Scroll to Text</option>
+                </optgroup>
+                <optgroup label="Navigation">
+                  <option value="go_to_url">Go to URL</option>
+                  <option value="go_back">Go Back</option>
+                  <option value="go_forward">Go Forward</option>
+                  <option value="refresh">Refresh Page</option>
+                  <option value="search_google">Search Google</option>
+                </optgroup>
+                <optgroup label="Tab Actions">
+                  <option value="open_tab">Open Tab</option>
+                  <option value="switch_tab">Switch Tab</option>
+                  <option value="close_tab">Close Tab</option>
+                </optgroup>
+                <optgroup label="Other">
+                  <option value="send_keys">Send Keys</option>
+                  <option value="wait">Wait</option>
+                  <option value="cache_content">Cache Content</option>
+                  <option value="done">Done</option>
+                </optgroup>
+              </select>
+              
+              <button
+                onClick={() => executeAction()}
+                disabled={!selectedAction || isExecuting}
+                className={`p-2 rounded-md transition-colors flex items-center gap-1 ${
+                  selectedAction && !isExecuting
+                    ? isDarkMode
+                      ? 'bg-green-600 hover:bg-green-500 text-white'
+                      : 'bg-green-500 hover:bg-green-600 text-white'
+                    : isDarkMode
+                      ? 'bg-slate-600 text-slate-400 cursor-not-allowed'
+                      : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                }`}
+                title="Execute action"
+              >
+                <MdPlayArrow size={16} />
+                <span className="text-xs">Execute</span>
+              </button>
+            </div>
+          </div>
+          
+          {/* Action Parameters */}
+          {selectedAction && (
+            <div className={`mb-3 p-3 rounded-md border ${isDarkMode ? 'bg-slate-700 border-sky-700' : 'bg-gray-50 border-sky-200'}`}>
+              <h4 className={`text-sm font-medium mb-2 ${isDarkMode ? 'text-sky-300' : 'text-sky-600'}`}>
+                Action Parameters
+              </h4>
+              {renderActionParams()}
+            </div>
+          )}
+          
           <div className={`text-xs space-y-1 ${isDarkMode ? 'text-sky-300' : 'text-gray-600'}`}>
             <div><strong>Index:</strong> {selectedElement.highlightIndex}</div>
             <div><strong>Tag:</strong> {selectedElement.tagName}</div>
@@ -422,6 +826,10 @@ const DOMAnalyzer: React.FC<DOMAnalyzerProps> = ({ isDarkMode }) => {
             )}
           </div>
         </div>
+      )}
+      
+      {!selectedElement && (
+        <div />
       )}
     </div>
   );
