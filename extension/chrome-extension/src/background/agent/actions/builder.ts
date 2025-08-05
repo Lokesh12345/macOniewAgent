@@ -229,7 +229,38 @@ export class ActionBuilder {
 
         const elementNode = state?.selectorMap.get(input.index);
         if (!elementNode) {
-          throw new Error(`Element with index ${input.index} does not exist - retry or use alternative actions`);
+          // Instead of failing, provide context about what was accomplished and what needs to be done
+          const accomplishedActions = this.context.actionResults
+            .filter(r => r.success !== false && r.extractedContent)
+            .map(r => r.extractedContent)
+            .join('; ');
+          
+          // Get the original task and current plan context
+          const originalTasks = this.context.messageManager.getMessages()
+            .filter(m => m.content.includes('ultimate task'))
+            .map(m => {
+              const match = m.content.match(/ultimate task is: """([^"]+)"""/);
+              return match ? match[1] : null;
+            })
+            .filter(Boolean);
+          
+          const lastPlan = this.context.messageManager.getMessages()
+            .filter(m => m.content.includes('next_steps'))
+            .slice(-1)[0]?.content || '';
+          
+          const recoveryMsg = `Element index ${input.index} no longer exists (DOM changed). ` +
+            `ULTIMATE TASK: ${originalTasks[originalTasks.length - 1] || 'Unknown task'}. ` +
+            `ACCOMPLISHED: ${accomplishedActions || 'Started task'}. ` +
+            `STILL NEEDED: Click the intended element. ` +
+            `PLAN CONTEXT: ${lastPlan.includes('next_steps') ? 'Check current plan in recent messages' : 'Continue with task'}. ` +
+            `ACTION: Re-analyze current DOM state and find the correct element for this action.`;
+          
+          this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_OK, recoveryMsg);
+          return new ActionResult({ 
+            extractedContent: recoveryMsg, 
+            includeInMemory: true,
+            success: false // Mark as needing retry with fresh analysis
+          });
         }
 
         // Check if element is a file uploader
@@ -284,11 +315,84 @@ export class ActionBuilder {
         const state = await page.getState();
 
         const elementNode = state?.selectorMap.get(input.index);
+        console.log(`🔍 INPUT_TEXT: index ${input.index}, text:"${input.text}" - ${elementNode ? 'FOUND' : 'MISSING'} (${elementNode?.tagName || 'none'})`);
+        
         if (!elementNode) {
-          throw new Error(`Element with index ${input.index} does not exist - retry or use alternative actions`);
+          // Instead of failing, provide context about what was accomplished and what needs to be done
+          const accomplishedActions = this.context.actionResults
+            .filter(r => r.success !== false && r.extractedContent)
+            .map(r => r.extractedContent)
+            .join('; ');
+          
+          // Get the original task and current plan context
+          const originalTasks = this.context.messageManager.getMessages()
+            .filter(m => m.content.includes('ultimate task'))
+            .map(m => {
+              const match = m.content.match(/ultimate task is: """([^"]+)"""/);
+              return match ? match[1] : null;
+            })
+            .filter(Boolean);
+          
+          const lastPlan = this.context.messageManager.getMessages()
+            .filter(m => m.content.includes('next_steps'))
+            .slice(-1)[0]?.content || '';
+          
+          const recoveryMsg = `Element index ${input.index} no longer exists (DOM changed). ` +
+            `ULTIMATE TASK: ${originalTasks[originalTasks.length - 1] || 'Unknown task'}. ` +
+            `ACCOMPLISHED: ${accomplishedActions || 'Started task'}. ` +
+            `STILL NEEDED: Input "${input.text}" into appropriate field. ` +
+            `PLAN CONTEXT: ${lastPlan.includes('next_steps') ? 'Check current plan in recent messages' : 'Continue with task'}. ` +
+            `ACTION: Re-analyze current DOM state and find the correct element for this input.`;
+          
+          console.log(`🔍 INPUT_TEXT: RECOVERY - ${recoveryMsg.substring(0,100)}...`);
+          this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_OK, recoveryMsg);
+          return new ActionResult({ 
+            extractedContent: recoveryMsg, 
+            includeInMemory: true,
+            success: false // Mark as needing retry with fresh analysis
+          });
         }
 
+        // Element type validation - only allow proper input elements
+        const validInputElements = ['input', 'textarea'];
+        const validComboboxElements = ['input', 'div']; // Gmail uses div with contenteditable for some fields
+        
+        if (!validInputElements.includes(elementNode.tagName) && 
+            !validComboboxElements.includes(elementNode.tagName)) {
+          const msg = `Cannot input text into ${elementNode.tagName} element at index ${input.index}. Need input, textarea, or contenteditable div.`;
+          console.log(`🚫 INVALID ELEMENT: ${msg}`);
+          this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_FAIL, msg);
+          return new ActionResult({ 
+            error: msg, 
+            includeInMemory: true 
+          });
+        }
+        
+        console.log(`🎯 VALID INPUT: Entering "${input.text}" into index ${input.index} (${elementNode.tagName})`);
         await page.inputTextElementNode(this.context.options.useVision, elementNode, input.text);
+        
+        // Check for autocomplete only on specific element types that can have autocomplete
+        if (elementNode.tagName === 'input' && elementNode.attributes?.role === 'combobox') {
+          await new Promise(resolve => setTimeout(resolve, 500));
+          const postInputState = await page.getState();
+          
+          // Look for autocomplete dropdown near the input element, not across entire page
+          const hasAutocomplete = Array.from(postInputState.selectorMap.values()).some(node => 
+            (node.attributes?.role === 'listbox' || node.attributes?.role === 'option') &&
+            node.highlightIndex !== null // Only consider visible/interactive elements
+          );
+          
+          if (hasAutocomplete) {
+            console.log(`🎯 AUTOCOMPLETE DETECTED - Breaking sequence to let LLM handle it`);
+            const msg = `Input ${input.text} into index ${input.index}. Autocomplete appeared - re-analyze DOM and handle autocomplete options.`;
+            this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_OK, msg);
+            return new ActionResult({ 
+              extractedContent: msg, 
+              includeInMemory: true 
+            });
+          }
+        }
+        
         const msg = `Input ${input.text} into index ${input.index}`;
         this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_OK, msg);
         return new ActionResult({ extractedContent: msg, includeInMemory: true });

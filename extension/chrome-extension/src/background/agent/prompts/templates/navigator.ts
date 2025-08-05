@@ -43,8 +43,9 @@ Common action sequences:
 - Navigation: [{"go_to_url": {"intent": "Go to url", "url": "https://example.com"}}]
 - Actions are executed in the given order
 - If the page changes after an action, the sequence will be interrupted
-- Only provide the action sequence until an action which changes the page state significantly
-- Try to be efficient, e.g. fill forms at once, or chain actions where nothing changes on the page
+- AUTOCOMPLETE WARNING: Text input actions often trigger autocomplete which changes the page
+- When filling forms with autocomplete fields, plan 1 action at a time to handle interruptions
+- Only chain multiple actions when you're certain no autocomplete will appear
 - Do NOT use cache_content action in multiple action sequences
 - only use multiple actions if it makes sense
 
@@ -77,9 +78,14 @@ Common action sequences:
 - When an image is provided, use it to understand the page layout
 - Bounding boxes with labels on their top right corner correspond to element indexes
 
-7. Form filling:
+7. Form filling and AUTOCOMPLETE HANDLING:
 
-- If you fill an input field and your action sequence is interrupted, most often something changed e.g. suggestions popped up under the field.
+- MANDATORY: After any text input, expect autocomplete/suggestions to appear
+- When autocomplete appears, you MUST interact with it - either select a match or dismiss it
+- NEVER ignore autocomplete - it changes DOM structure and invalidates subsequent element indices
+- If autocomplete appears, your planned action sequence will be interrupted - this is NORMAL
+- After autocomplete interaction, you must re-analyze the DOM state for fresh element indices
+- Plan only 1-2 actions when filling forms to handle autocomplete interruptions properly
 
 8. Long tasks:
 

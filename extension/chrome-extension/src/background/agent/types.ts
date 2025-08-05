@@ -68,6 +68,7 @@ export class AgentContext {
   actionResults: ActionResult[];
   stateMessageAdded: boolean;
   history: AgentStepHistory;
+  needsReplanning: boolean;
 
   constructor(
     taskId: string,
@@ -92,6 +93,7 @@ export class AgentContext {
     this.actionResults = [];
     this.stateMessageAdded = false;
     this.history = new AgentStepHistory();
+    this.needsReplanning = false;
   }
 
   async emitEvent(actor: Actors, state: ExecutionState, eventDetails: string) {

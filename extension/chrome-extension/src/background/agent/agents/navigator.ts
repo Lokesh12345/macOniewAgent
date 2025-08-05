@@ -355,6 +355,13 @@ export class NavigatorAgent extends BaseAgent<z.ZodType, NavigatorResult> {
     const results: ActionResult[] = [];
     let errCount = 0;
     logger.info('Actions', actions);
+    
+    // 🎯 FOCUSED LOG: LLM planned actions
+    console.log("🎯 LLM PLANNED:", actions.map((a, i) => {
+      const actionName = Object.keys(a)[0];
+      const actionArgs = a[actionName] as any;
+      return `${i+1}. ${actionName}(index:${actionArgs?.index}, text:"${actionArgs?.text?.substring(0,20)}...")`;
+    }));
 
     const browserContext = this.context.browserContext;
     const browserState = await browserContext.getState(this.context.options.useVision);
@@ -378,19 +385,47 @@ export class NavigatorAgent extends BaseAgent<z.ZodType, NavigatorResult> {
 
         const indexArg = actionInstance.getIndexArg(actionArgs);
         if (i > 0 && indexArg !== null) {
-          const newState = await browserContext.getState(this.context.options.useVision);
-          const newPathHashes = await calcBranchPathHashSet(newState);
-          // next action requires index but there are new elements on the page
-          if (!newPathHashes.isSubsetOf(cachedPathHashes)) {
-            const msg = `Something new appeared after action ${i} / ${actions.length}`;
-            logger.info(msg);
-            results.push(
-              new ActionResult({
-                extractedContent: msg,
-                includeInMemory: true,
-              }),
-            );
-            break;
+          // Check if previous action handled DOM changes - skip obstruction detection
+          const previousResult = results[results.length - 1];
+          let skipObstructionCheck = false;
+          
+          if (previousResult?.extractedContent?.includes('DOM changed, re-analyze')) {
+            skipObstructionCheck = true;
+            console.log(`🚧 OBSTRUCTION: SKIPPED - Previous action handled DOM changes`);
+          }
+          
+          // Legacy: Also skip for combobox interactions
+          const previousAction = actions[i - 1];
+          const previousActionName = Object.keys(previousAction)[0];
+          if (previousActionName === 'input_text') {
+            const previousIndex = previousAction[previousActionName]?.index;
+            if (typeof previousIndex === 'number') {
+              const previousElement = browserState.selectorMap.get(previousIndex);
+              if (previousElement?.attributes?.role === 'combobox') {
+                skipObstructionCheck = true;
+                console.log(`🚧 OBSTRUCTION: SKIPPED for combobox at index ${previousIndex}`);
+              }
+            }
+          }
+          
+          if (!skipObstructionCheck) {
+            const newState = await browserContext.getState(this.context.options.useVision);
+            const newPathHashes = await calcBranchPathHashSet(newState);
+            // next action requires index but there are new elements on the page
+            if (!newPathHashes.isSubsetOf(cachedPathHashes)) {
+              const msg = `Something new appeared after action ${i} / ${actions.length}`;
+              console.log(`🚧 OBSTRUCTION: DETECTED - ${msg}`);
+              logger.info(msg);
+              results.push(
+                new ActionResult({
+                  extractedContent: msg,
+                  includeInMemory: true,
+                }),
+              );
+              break;
+            } else {
+              console.log(`🚧 OBSTRUCTION: NONE - DOM unchanged, continuing`);
+            }
           }
         }
 
@@ -410,6 +445,12 @@ export class NavigatorAgent extends BaseAgent<z.ZodType, NavigatorResult> {
           }
         }
         results.push(result);
+
+        // Check if autocomplete was detected - if so, break the sequence immediately
+        if (result.extractedContent?.includes('Autocomplete appeared')) {
+          console.log(`🎯 SEQUENCE BREAK: Autocomplete detected, stopping remaining ${actions.length - i - 1} actions`);
+          break;
+        }
 
         // check if the task is paused or stopped
         if (this.context.paused || this.context.stopped) {

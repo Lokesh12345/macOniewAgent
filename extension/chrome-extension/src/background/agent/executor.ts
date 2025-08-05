@@ -147,8 +147,18 @@ export class Executor {
           break;
         }
 
+        // Check if we need to force re-planning due to DOM changes (like autocomplete)
+        const needsReplanning = this.shouldForceReplanning();
+        
         // Run planner if configured
-        if (this.planner && (context.nSteps % context.options.planningInterval === 0 || validatorFailed)) {
+        if (this.planner && (context.nSteps % context.options.planningInterval === 0 || validatorFailed || needsReplanning)) {
+          if (needsReplanning) {
+            console.log('🎯 PLANNER: Re-planning triggered by DOM changes (e.g., autocomplete)');
+          } else if (validatorFailed) {
+            console.log('🎯 PLANNER: Re-planning triggered by validator failure');  
+          } else {
+            console.log(`🎯 PLANNER: Regular planning interval (step ${context.nSteps})`);
+          }
           validatorFailed = false;
           // The first planning step is special, we don't want to add the browser state message to memory
           let positionForPlan = 0;
@@ -257,6 +267,20 @@ export class Executor {
       if (context.paused || context.stopped) {
         return false;
       }
+      
+      // Check if any action results indicate DOM changes (like autocomplete)
+      if (context.actionResults && context.actionResults.length > 0) {
+        for (const result of context.actionResults) {
+          if (result.extractedContent?.includes('Autocomplete appeared') || 
+              result.extractedContent?.includes('re-analyze DOM')) {
+            console.log('🎯 DOM CHANGE DETECTED - Will trigger re-planning on next iteration');
+            console.log('🎯 Trigger content:', result.extractedContent);
+            context.needsReplanning = true;
+            break; // Only need to set the flag once
+          }
+        }
+      }
+      
       context.nSteps++;
       if (navOutput.error) {
         throw new Error(navOutput.error);
@@ -283,6 +307,19 @@ export class Executor {
       }
     }
     return false;
+  }
+
+  /**
+   * Check if we need to force re-planning due to DOM changes
+   */
+  private shouldForceReplanning(): boolean {
+    const needsReplanning = this.context.needsReplanning || false;
+    if (needsReplanning) {
+      console.log('🎯 FORCING RE-PLANNING due to DOM changes');
+      // Reset the flag after consuming it
+      this.context.needsReplanning = false;
+    }
+    return needsReplanning;
   }
 
   private async shouldStop(): Promise<boolean> {
