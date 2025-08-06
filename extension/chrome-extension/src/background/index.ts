@@ -6,6 +6,7 @@ import {
   generalSettingsStore,
   llmProviderStore,
   initializeDefaults,
+  forceInitializeDefaults,
 } from '@extension/storage';
 import BrowserContext from './browser/context';
 import { Executor } from './agent/executor';
@@ -84,9 +85,33 @@ chrome.tabs.onRemoved.addListener(tabId => {
 
 logger.info('background loaded');
 
-// Initialize defaults for fresh installations
-initializeDefaults().catch(error => {
-  console.error('Failed to initialize defaults:', error);
+// Initialize defaults SYNCHRONOUSLY before any tasks can run
+let isInitialized = false;
+let initializationPromise: Promise<void> | null = null;
+
+async function ensureInitialized() {
+  if (isInitialized) return;
+  
+  if (!initializationPromise) {
+    console.log('🚀 Starting BLOCKING initialization...');
+    initializationPromise = (async () => {
+      try {
+        await forceInitializeDefaults();
+        console.log('✅ BLOCKING initialization completed successfully');
+        isInitialized = true;
+      } catch (error) {
+        console.error('❌ BLOCKING initialization failed:', error);
+        throw error;
+      }
+    })();
+  }
+  
+  await initializationPromise;
+}
+
+// Run initialization immediately
+ensureInitialized().catch(error => {
+  console.error('❌ Failed to ensure initialization:', error);
 });
 
 // Listen for simple messages (e.g., from options page)
@@ -113,6 +138,11 @@ chrome.runtime.onConnect.addListener(port => {
             if (!message.task) return port.postMessage({ type: 'error', error: 'No task provided' });
             if (!message.tabId) return port.postMessage({ type: 'error', error: 'No tab ID provided' });
 
+            // ENSURE INITIALIZATION IS COMPLETE BEFORE RUNNING TASK
+            console.log('🔄 Ensuring initialization before running task...');
+            await ensureInitialized();
+            console.log('✅ Initialization confirmed, proceeding with task...');
+
             logger.info('new_task', message.tabId, message.task);
             currentExecutor = await setupExecutor(message.taskId, message.task, browserContext);
             subscribeToExecutorEvents(currentExecutor);
@@ -124,6 +154,9 @@ chrome.runtime.onConnect.addListener(port => {
           case 'follow_up_task': {
             if (!message.task) return port.postMessage({ type: 'error', error: 'No follow up task provided' });
             if (!message.tabId) return port.postMessage({ type: 'error', error: 'No tab ID provided' });
+
+            // ENSURE INITIALIZATION IS COMPLETE 
+            await ensureInitialized();
 
             logger.info('follow_up_task', message.tabId, message.task);
 
@@ -235,6 +268,10 @@ chrome.runtime.onConnect.addListener(port => {
             if (!message.taskId) return port.postMessage({ type: 'error', error: 'No task ID provided' });
             if (!message.historySessionId)
               return port.postMessage({ type: 'error', error: 'No history session ID provided' });
+            
+            // ENSURE INITIALIZATION IS COMPLETE 
+            await ensureInitialized();
+            
             logger.info('replay', message.tabId, message.taskId, message.historySessionId);
 
             try {
