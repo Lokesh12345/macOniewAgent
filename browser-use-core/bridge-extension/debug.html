@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Bridge Extension Debug Test</title>
+    <style>
+        body { 
+            font-family: monospace; 
+            background: #1e1e1e; 
+            color: #ffffff; 
+            padding: 20px;
+        }
+        .status { 
+            margin: 10px 0; 
+            padding: 10px; 
+            border-radius: 5px; 
+        }
+        .success { background: #2d5a2d; }
+        .error { background: #5a2d2d; }
+        .info { background: #2d2d5a; }
+        .warning { background: #5a5a2d; }
+        #log {
+            background: #000;
+            color: #0f0;
+            padding: 10px;
+            height: 400px;
+            overflow-y: scroll;
+            border: 1px solid #333;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔧 Bridge Extension Debug Test</h1>
+    
+    <div id="status" class="status info">
+        <strong>Status:</strong> Testing connection...
+    </div>
+    
+    <div class="status warning">
+        <strong>Instructions:</strong>
+        <ol>
+            <li>Make sure the bridge server is running (python3 -m browser_use.bridge_controller)</li>
+            <li>Open Chrome DevTools (F12)</li>
+            <li>Go to Console tab</li>
+            <li>Look for connection logs and any errors</li>
+        </ol>
+    </div>
+    
+    <h3>Connection Log:</h3>
+    <div id="log"></div>
+    
+    <script>
+        const statusDiv = document.getElementById('status');
+        const logDiv = document.getElementById('log');
+        
+        function log(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            const logEntry = `[${timestamp}] ${message}\n`;
+            logDiv.textContent += logEntry;
+            logDiv.scrollTop = logDiv.scrollHeight;
+            console.log(message);
+        }
+        
+        function updateStatus(message, type = 'info') {
+            statusDiv.textContent = `Status: ${message}`;
+            statusDiv.className = `status ${type}`;
+        }
+        
+        // Test connection
+        log('🔧 Starting Bridge Extension Debug Test');
+        log('🔍 Testing WebSocket connection to ws://localhost:9898');
+        
+        try {
+            const ws = new WebSocket('ws://localhost:9898');
+            
+            ws.onopen = () => {
+                log('✅ WebSocket connection established successfully');
+                updateStatus('Connected to bridge server', 'success');
+                
+                // Send ready message
+                const readyMsg = {
+                    type: 'ready',
+                    message: 'Debug test page connected',
+                    timestamp: Date.now(),
+                    userAgent: navigator.userAgent
+                };
+                
+                ws.send(JSON.stringify(readyMsg));
+                log('📤 Sent ready message: ' + JSON.stringify(readyMsg, null, 2));
+            };
+            
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    log('📥 Received message: ' + JSON.stringify(data, null, 2));
+                    
+                    if (data.type === 'welcome') {
+                        log('✅ Welcome message received: ' + data.message);
+                        updateStatus('Handshake completed successfully', 'success');
+                    }
+                } catch (e) {
+                    log('❌ Failed to parse message: ' + e.message);
+                    log('Raw message: ' + event.data);
+                }
+            };
+            
+            ws.onclose = (event) => {
+                log(`🔌 WebSocket closed: Code ${event.code}, Reason: ${event.reason || 'No reason'}`);
+                
+                if (event.code === 1006) {
+                    log('❌ Connection failed - server may be down or blocked');
+                    updateStatus('Connection failed - server may be down', 'error');
+                } else if (event.code === 1000) {
+                    log('✅ Clean close - normal disconnection');
+                    updateStatus('Disconnected normally', 'info');
+                } else {
+                    log(`❌ Unexpected close code: ${event.code}`);
+                    updateStatus('Unexpected disconnection', 'warning');
+                }
+            };
+            
+            ws.onerror = (error) => {
+                log('❌ WebSocket error occurred');
+                log('❌ Possible causes:');
+                log('   - Bridge server not running on localhost:9898');
+                log('   - Network/firewall blocking the connection');  
+                log('   - CORS or security policy blocking connection');
+                updateStatus('WebSocket connection error', 'error');
+            };
+            
+        } catch (error) {
+            log('❌ Failed to create WebSocket: ' + error.message);
+            updateStatus('Failed to create WebSocket', 'error');
+        }
+        
+        // Test browser APIs
+        log('🔍 Testing browser environment...');
+        log('- WebSocket support: ' + (typeof WebSocket !== 'undefined' ? '✅' : '❌'));
+        log('- Chrome extension context: ' + (typeof chrome !== 'undefined' ? '✅' : '❌'));
+        log('- User agent: ' + navigator.userAgent);
+        
+        if (typeof chrome !== 'undefined') {
+            log('- chrome.runtime available: ' + (chrome.runtime ? '✅' : '❌'));
+            log('- Extension ID: ' + (chrome.runtime ? chrome.runtime.id : 'N/A'));
+        }
+    </script>
+</body>
+</html>

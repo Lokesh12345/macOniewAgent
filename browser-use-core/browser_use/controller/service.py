@@ -149,8 +149,13 @@ class Controller(Generic[Context]):
 
 		@self.registry.action('Click element by index', param_model=ClickElementAction)
 		async def click_element_by_index(params: ClickElementAction, browser_session: BrowserSession):
+			logger.info(f"🎯 DEBUG: click_element_by_index called with params.index={params.index}")
+			
 			element_node = await browser_session.get_dom_element_by_index(params.index)
+			logger.info(f"🔍 DEBUG: get_dom_element_by_index returned: {type(element_node)} - {element_node}")
+			
 			if element_node is None:
+				logger.error(f"❌ DEBUG: Element index {params.index} does not exist")
 				raise Exception(f'Element index {params.index} does not exist - retry or use alternative actions')
 
 			initial_pages = len(browser_session.tabs)
@@ -165,7 +170,9 @@ class Controller(Generic[Context]):
 			msg = None
 
 			try:
+				logger.info(f"🎯 DEBUG: About to call browser_session._click_element_node with element_node: {element_node}")
 				download_path = await browser_session._click_element_node(element_node)
+				logger.info(f"✅ DEBUG: browser_session._click_element_node returned: {download_path}")
 				if download_path:
 					emoji = '💾'
 					msg = f'Downloaded file to {download_path}'
@@ -183,6 +190,7 @@ class Controller(Generic[Context]):
 					await browser_session.switch_to_tab(-1)
 				return ActionResult(extracted_content=msg, include_in_memory=True, long_term_memory=msg)
 			except Exception as e:
+				logger.error(f'❌ Click element {params.index} failed: {str(e)}')
 				error_msg = str(e)
 				raise BrowserError(error_msg)
 

@@ -445,6 +445,17 @@ Examples:
                         <input type="number" id="max-steps" value="10" min="1" max="50">
                     </div>
                     <div class="setting-group">
+                        <label>Browser Mode:</label>
+                        <div style="margin-top: 5px;">
+                            <label style="margin-right: 15px;">
+                                <input type="radio" name="browser-mode" value="new" > New Browser
+                            </label>
+                            <label>
+                                <input type="radio" name="browser-mode" value="same" checked> Same Browser
+                            </label>
+                        </div>
+                    </div>
+                    <div class="setting-group" id="headless-option">
                         <label>
                             <input type="checkbox" id="headless"> Headless Mode
                         </label>
@@ -725,6 +736,7 @@ Examples:
             }
 
             const maxSteps = parseInt(document.getElementById('max-steps').value);
+            const browserMode = document.querySelector('input[name="browser-mode"]:checked').value;
             const headless = document.getElementById('headless').checked;
 
             fetch('/api/run_task', {
@@ -735,6 +747,7 @@ Examples:
                 body: JSON.stringify({
                     prompt: prompt,
                     max_steps: maxSteps,
+                    browser_mode: browserMode,
                     headless: headless
                 })
             })
@@ -926,6 +939,19 @@ Examples:
                 selectModelBtn.textContent = '🔗 Connect Model';
             });
         }
+
+        // Handle browser mode changes
+        document.querySelectorAll('input[name="browser-mode"]').forEach(radio => {
+            radio.addEventListener('change', (e) => {
+                const headlessOption = document.getElementById('headless-option');
+                if (e.target.value === 'same') {
+                    headlessOption.style.display = 'none';
+                    document.getElementById('headless').checked = false;
+                } else {
+                    headlessOption.style.display = 'block';
+                }
+            });
+        });
 
         // Initialize
         updateStatus();

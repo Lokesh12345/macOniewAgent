@@ -27,7 +27,11 @@
       "mcp__ide__getDiagnostics",
       "Bash(grep:*)",
       "Bash(npm run build:*)",
-      "Bash(python3:*)"
+      "Bash(python3:*)",
+      "Bash(pip3 install:*)",
+      "Bash(true)",
+      "Bash(timeout:*)",
+      "Bash(python:*)"
     ],
     "deny": []
   }

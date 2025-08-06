@@ -32,6 +32,7 @@ from browser_use.llm.google.chat import ChatGoogle
 from browser_use.llm.deepseek.chat import ChatDeepSeek
 from browser_use.llm.groq.chat import ChatGroq
 from browser_use.agent.enhanced_service import MemoryManager
+from browser_use.bridge_controller import BridgeController, BridgeSession
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'browser_use_secret_key_2024'
@@ -46,6 +47,7 @@ is_task_running = False
 task_thread = None
 stop_task_requested = False
 current_task_loop = None
+bridge_controller = None
 
 # Settings file path
 SETTINGS_FILE = Path(__file__).parent / 'gui_settings.json'
@@ -380,6 +382,7 @@ def run_task():
     data = request.json
     prompt = data.get('prompt', '').strip()
     max_steps = data.get('max_steps', 10)
+    browser_mode = data.get('browser_mode', 'new')
     headless = data.get('headless', False)
     
     if not prompt:
@@ -388,7 +391,7 @@ def run_task():
     # Start task in background thread
     task_thread = threading.Thread(
         target=run_browser_task_async,
-        args=(prompt, max_steps, headless),
+        args=(prompt, max_steps, browser_mode, headless),
         daemon=True
     )
     task_thread.start()
@@ -501,7 +504,7 @@ def initialize_default_llm():
         current_llm = None
 
 
-def run_browser_task_async(prompt, max_steps, headless):
+def run_browser_task_async(prompt, max_steps, browser_mode, headless):
     """Run browser task asynchronously"""
     global current_agent, current_browser_session, is_task_running, stop_task_requested, current_task_loop
     
@@ -522,7 +525,7 @@ def run_browser_task_async(prompt, max_steps, headless):
                 socketio.emit('task_stopped', {'message': 'Task stopped before execution'})
                 return
                 
-            result = loop.run_until_complete(execute_browser_task(prompt, max_steps, headless))
+            result = loop.run_until_complete(execute_browser_task(prompt, max_steps, browser_mode, headless))
             
             # Check if task was stopped during execution
             if stop_task_requested:
@@ -558,7 +561,7 @@ def run_browser_task_async(prompt, max_steps, headless):
         stop_task_requested = False
 
 
-async def execute_browser_task(prompt, max_steps, headless):
+async def execute_browser_task(prompt, max_steps, browser_mode, headless):
     """Execute the browser task with agent"""
     global current_agent, current_browser_session, stop_task_requested
     
@@ -569,15 +572,25 @@ async def execute_browser_task(prompt, max_steps, headless):
             return {'success': False, 'stopped': True, 'message': 'Task stopped'}
             
         web_logger.log('INFO', f'🚀 Starting task: {prompt}')
-        web_logger.log('INFO', f'⚙️ Settings - Max steps: {max_steps}, Headless: {headless}')
+        web_logger.log('INFO', f'⚙️ Settings - Max steps: {max_steps}, Mode: {browser_mode}, Headless: {headless}')
         
-        # Create browser session
-        profile = BrowserProfile(
-            headless=headless,
-            viewport_size=(1200, 800)
-        )
-        current_browser_session = BrowserSession(profile=profile)
-        web_logger.log('INFO', '🌐 Browser session created')
+        # Create browser session based on mode
+        if browser_mode == 'same':
+            # Use bridge mode
+            if not bridge_controller or not bridge_controller.is_connected():
+                web_logger.log('ERROR', '❌ Bridge extension not connected! Please install and connect the extension.')
+                return {'success': False, 'error': 'Bridge extension not connected'}
+            
+            current_browser_session = BridgeSession(bridge_controller)
+            web_logger.log('INFO', '🌐 Using existing browser via bridge extension')
+        else:
+            # Use new browser with Playwright
+            profile = BrowserProfile(
+                headless=headless,
+                viewport_size=(1200, 800)
+            )
+            current_browser_session = BrowserSession(profile=profile)
+            web_logger.log('INFO', '🌐 New browser session created')
         
         # Check for stop request
         if stop_task_requested:
@@ -665,8 +678,8 @@ async def execute_browser_task(prompt, max_steps, headless):
             }
             
     finally:
-        # Clean up browser session
-        if current_browser_session:
+        # Clean up browser session (only for new browser mode)
+        if current_browser_session and browser_mode != 'same':
             try:
                 await current_browser_session.close()
                 web_logger.log('INFO', '🔒 Browser session closed')
@@ -700,12 +713,34 @@ def handle_get_status():
     emit('status_update', status)
 
 
+async def start_bridge_server():
+    """Start the bridge controller server"""
+    global bridge_controller
+    try:
+        bridge_controller = BridgeController(port=9898)
+        await bridge_controller.start_server()
+        web_logger.log('INFO', '🌉 Bridge server started on port 9898')
+    except Exception as e:
+        web_logger.log('ERROR', f'❌ Failed to start bridge server: {e}')
+        bridge_controller = None
+
+
 if __name__ == '__main__':
     # Initialize default LLM in background
     threading.Thread(target=initialize_default_llm, daemon=True).start()
     
+    # Start bridge server in background
+    def run_bridge_server():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(start_bridge_server())
+        loop.run_forever()
+    
+    threading.Thread(target=run_bridge_server, daemon=True).start()
+    
     print("🌐 Starting Browser-Use Web GUI...")
     print("📱 Access the interface at: http://localhost:8888")
+    print("🌉 Bridge server listening on: ws://localhost:9898")
     print("🛑 Press Ctrl+C to stop")
     
     # Run Flask app with WebSocket support
