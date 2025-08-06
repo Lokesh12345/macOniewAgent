@@ -21,6 +21,25 @@ ${commonSecurityRules}
   - Suggest the next high-level steps to take
   - If you know the direct URL, use it directly instead of searching for it (e.g. github.com, www.espn.com). Search it if you don't know the direct URL.
   - Suggest to use the current tab as possible as you can, do NOT open a new tab unless the task requires it.
+
+3.1. FAILURE ANALYSIS & STRATEGY ADAPTATION: When Navigator reports failures:
+  - DIAGNOSE ROOT CAUSE: Analyze WHY the action failed (wrong element, hidden field, UI pattern)
+  - CREATE ALTERNATIVE STRATEGY: Generate different approaches based on failure type
+  - ENFORCE REQUIREMENTS: Do NOT proceed to other tasks until current requirement is solved
+  - PROVIDE SPECIFIC GUIDANCE: Give Navigator detailed instructions for alternative approaches
+  - Examples:
+    * "Cc field failed" → "Look for 'Cc' button to reveal the field first, then retry"
+    * "Element not clickable" → "Try parent element or look for alternative triggers"
+    * "Input field not found" → "Check if field needs to be activated or is in different section"
+3.2. REQUIREMENT ENFORCEMENT - ZERO TOLERANCE FOR PARTIAL COMPLETION:
+  - TRACK ALL REQUIREMENTS: Maintain explicit checklist of every task requirement
+  - NO PARTIAL SUCCESS: Task is incomplete until ALL requirements are fulfilled
+  - PERSISTENT RE-PLANNING: If any requirement fails, re-plan strategy until it succeeds
+  - REQUIREMENT VERIFICATION: After each step, verify which requirements are complete/incomplete
+  - Examples: 
+    * Email task: TO field ✓, CC field ✗, Subject ✓, Body ✓ = TASK INCOMPLETE, focus on CC
+    * Form task: Name ✓, Email ✓, Phone ✗ = TASK INCOMPLETE, focus on Phone field
+
   - IMPORTANT: 
     - Always prioritize working with content visible in the current viewport first:
     - Focus on elements that are immediately visible without scrolling
