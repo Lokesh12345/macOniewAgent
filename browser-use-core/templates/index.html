@@ -1,0 +1,937 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🤖 Browser-Use Web GUI</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #1e3c72, #2a5298);
+            color: #ffffff;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 20px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            overflow: hidden;
+        }
+
+        .header {
+            text-align: center;
+            padding: 30px;
+            background: rgba(255, 255, 255, 0.1);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            background: linear-gradient(45deg, #ffd700, #ffba08);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            text-shadow: 0 2px 10px rgba(255, 215, 0, 0.3);
+        }
+
+        .header p {
+            font-size: 1.1rem;
+            opacity: 0.9;
+        }
+
+        .main-content {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            padding: 30px;
+            min-height: 600px;
+        }
+
+        .panel {
+            background: rgba(255, 255, 255, 0.08);
+            border-radius: 15px;
+            padding: 25px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .panel h3 {
+            font-size: 1.3rem;
+            margin-bottom: 20px;
+            color: #ffd700;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .status-bar {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 15px;
+            margin-bottom: 25px;
+            padding: 20px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 10px;
+        }
+
+        .status-item {
+            text-align: center;
+            padding: 10px;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .status-label {
+            font-size: 0.9rem;
+            opacity: 0.8;
+            margin-bottom: 5px;
+        }
+
+        .status-value {
+            font-weight: bold;
+            font-size: 1.1rem;
+        }
+
+        .status-connected { color: #4ade80; }
+        .status-running { color: #f59e0b; }
+        .status-error { color: #ef4444; }
+        .status-idle { color: #94a3b8; }
+
+        textarea {
+            width: 100%;
+            min-height: 120px;
+            padding: 15px;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            border-radius: 10px;
+            background: rgba(0, 0, 0, 0.3);
+            color: #ffffff;
+            font-size: 14px;
+            font-family: inherit;
+            resize: vertical;
+            margin-bottom: 20px;
+        }
+
+        textarea:focus {
+            outline: none;
+            border-color: #ffd700;
+            box-shadow: 0 0 0 3px rgba(255, 215, 0, 0.2);
+        }
+
+        .quick-tasks {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .quick-task {
+            padding: 10px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 8px;
+            color: #ffffff;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-size: 0.9rem;
+            text-align: center;
+        }
+
+        .quick-task:hover {
+            background: rgba(255, 255, 255, 0.2);
+            transform: translateY(-2px);
+        }
+
+        .model-selection {
+            margin-bottom: 25px;
+            padding: 20px;
+            background: rgba(0, 50, 100, 0.2);
+            border: 1px solid rgba(100, 150, 255, 0.3);
+            border-radius: 12px;
+        }
+
+        .model-controls {
+            margin-top: 15px;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .model-info {
+            padding: 8px 12px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 6px;
+            font-size: 0.9rem;
+        }
+
+        .settings {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-bottom: 20px;
+            padding: 15px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 10px;
+        }
+
+        .setting-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .setting-group label {
+            font-size: 0.9rem;
+            opacity: 0.9;
+        }
+
+        input, select {
+            padding: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 5px;
+            background: rgba(0, 0, 0, 0.3);
+            color: #ffffff;
+            font-size: 14px;
+        }
+
+        input[type="checkbox"] {
+            width: auto;
+        }
+
+        .controls {
+            display: flex;
+            gap: 15px;
+        }
+
+        button {
+            flex: 1;
+            padding: 12px 20px;
+            border: none;
+            border-radius: 8px;
+            font-weight: bold;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(45deg, #10b981, #059669);
+            color: white;
+        }
+
+        .btn-secondary {
+            background: linear-gradient(45deg, #ef4444, #dc2626);
+            color: white;
+        }
+
+        .btn-disabled {
+            background: #6b7280;
+            color: #9ca3af;
+            cursor: not-allowed;
+        }
+
+        button:hover:not(.btn-disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+        }
+
+        .output-area {
+            height: 300px;
+            overflow-y: auto;
+            background: rgba(0, 0, 0, 0.4);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 10px;
+            padding: 15px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            margin-bottom: 20px;
+        }
+
+        .memory-area {
+            height: 250px;
+            overflow-y: auto;
+            background: rgba(0, 50, 0, 0.3);
+            border: 1px solid rgba(0, 255, 0, 0.3);
+            border-radius: 10px;
+            padding: 15px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            color: #4ade80;
+        }
+
+        .log-entry {
+            margin-bottom: 8px;
+            line-height: 1.4;
+        }
+
+        .log-timestamp {
+            color: #94a3b8;
+            margin-right: 10px;
+        }
+
+        .log-level-INFO { color: #3b82f6; }
+        .log-level-ERROR { color: #ef4444; }
+        .log-level-WARNING { color: #f59e0b; }
+
+        .progress-bar {
+            width: 100%;
+            height: 4px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 2px;
+            margin: 20px 0;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #ffd700, #ffba08);
+            width: 0%;
+            transition: width 0.3s ease;
+            border-radius: 2px;
+        }
+
+        .progress-indeterminate {
+            animation: indeterminate 2s infinite linear;
+            width: 30%;
+        }
+
+        @keyframes indeterminate {
+            0% { transform: translateX(-100%); }
+            100% { transform: translateX(400%); }
+        }
+
+        .footer {
+            text-align: center;
+            padding: 20px;
+            border-top: 1px solid rgba(255, 255, 255, 0.2);
+            background: rgba(0, 0, 0, 0.2);
+            opacity: 0.8;
+            font-size: 0.9rem;
+        }
+
+        @media (max-width: 768px) {
+            .main-content {
+                grid-template-columns: 1fr;
+            }
+            
+            .header h1 {
+                font-size: 2rem;
+            }
+            
+            .status-bar {
+                grid-template-columns: repeat(2, 1fr);
+                gap: 10px;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .status-bar {
+                grid-template-columns: 1fr;
+                gap: 8px;
+            }
+        }
+
+        /* Scrollbar styling */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.5);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🤖 Browser-Use Web GUI</h1>
+            <p>AI-powered browser automation through natural language prompts</p>
+        </div>
+
+        <div class="status-bar">
+            <div class="status-item">
+                <div class="status-label">🤖 Current Model</div>
+                <div class="status-value" id="current-model">Not Selected</div>
+            </div>
+            <div class="status-item">
+                <div class="status-label">🔌 LLM Status</div>
+                <div class="status-value" id="llm-status">Connecting...</div>
+            </div>
+            <div class="status-item">
+                <div class="status-label">🌐 Browser Status</div>
+                <div class="status-value" id="browser-status">Ready</div>
+            </div>
+            <div class="status-item">
+                <div class="status-label">⚡ Agent Status</div>
+                <div class="status-value" id="agent-status">Idle</div>
+            </div>
+        </div>
+
+        <div class="progress-bar">
+            <div class="progress-fill" id="progress-bar"></div>
+        </div>
+
+        <div class="main-content">
+            <div class="panel">
+                <h3>🤖 Model Selection</h3>
+                
+                <div class="model-selection">
+                    <div class="setting-group">
+                        <label for="provider-select">Provider:</label>
+                        <select id="provider-select" onchange="onProviderChange()">
+                            <option value="">Select Provider...</option>
+                        </select>
+                    </div>
+                    <div class="setting-group">
+                        <label for="model-select">Model:</label>
+                        <select id="model-select" onchange="onModelChange()" disabled>
+                            <option value="">Select Model...</option>
+                        </select>
+                    </div>
+                    <div class="model-controls">
+                        <button id="select-model-btn" class="btn-primary btn-disabled" onclick="selectModel()" disabled>
+                            🔗 Connect Model
+                        </button>
+                        <div id="model-info" class="model-info" style="display: none;">
+                            <span id="model-status"></span>
+                        </div>
+                    </div>
+                </div>
+
+                <h3>🎯 Task Input</h3>
+                
+                <textarea id="prompt-input" placeholder="Enter your task here...
+
+Examples:
+• Navigate to Google and search for 'AI automation'
+• Go to Gmail and check for new emails  
+• Visit Wikipedia and search for 'artificial intelligence'
+• Go to Amazon and find laptops under $1000"></textarea>
+
+                <div class="quick-tasks">
+                    <div class="quick-task" onclick="setQuickTask('Navigate to Google and search for \'AI automation\'')">🔍 Google Search</div>
+                    <div class="quick-task" onclick="setQuickTask('Go to Gmail and check for new emails')">📧 Gmail Check</div>
+                    <div class="quick-task" onclick="setQuickTask('Visit Wikipedia and search for \'artificial intelligence\'')">📚 Wikipedia</div>
+                    <div class="quick-task" onclick="setQuickTask('Go to GitHub and search for \'browser automation\'')">💻 GitHub</div>
+                </div>
+
+                <div class="settings">
+                    <div class="setting-group">
+                        <label for="max-steps">Max Steps:</label>
+                        <input type="number" id="max-steps" value="10" min="1" max="50">
+                    </div>
+                    <div class="setting-group">
+                        <label>
+                            <input type="checkbox" id="headless"> Headless Mode
+                        </label>
+                    </div>
+                </div>
+
+                <div class="controls">
+                    <button id="run-btn" class="btn-primary" onclick="runTask()">
+                        🚀 Run Task
+                    </button>
+                    <button id="stop-btn" class="btn-secondary btn-disabled" onclick="stopTask()" disabled>
+                        ⏹️ Stop
+                    </button>
+                </div>
+            </div>
+
+            <div class="panel">
+                <h3>📋 Output & Logs</h3>
+                <div class="output-area" id="output-area">
+                    <div class="log-entry">
+                        <span class="log-timestamp">[System]</span>
+                        <span class="log-level-INFO">🌐 Web GUI initialized - Ready for tasks!</span>
+                    </div>
+                </div>
+
+                <h3>🧠 Memory & Stats</h3>
+                <div class="memory-area" id="memory-area">
+                    <div style="color: #ffd700;">🧠 MEMORY SYSTEM</div>
+                    <div style="margin: 10px 0;">================================</div>
+                    <div>📝 Task Memory: Ready</div>
+                    <div>🎯 Autocomplete Events: 0</div>
+                    <div>🛑 Should Break Sequence: false</div>
+                    <div style="margin: 10px 0;">================================</div>
+                    <div style="opacity: 0.7;">Waiting for task execution...</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="footer">
+            <p>🚀 Enhanced Browser-Use with Oniew Agent Innovations | Connect to http://localhost:5000</p>
+        </div>
+    </div>
+
+    <script>
+        // Initialize Socket.IO
+        const socket = io();
+        let isTaskRunning = false;
+
+        // DOM elements
+        const promptInput = document.getElementById('prompt-input');
+        const runBtn = document.getElementById('run-btn');
+        const stopBtn = document.getElementById('stop-btn');
+        const outputArea = document.getElementById('output-area');
+        const memoryArea = document.getElementById('memory-area');
+        const progressBar = document.getElementById('progress-bar');
+        const currentModelDisplay = document.getElementById('current-model');
+        const llmStatus = document.getElementById('llm-status');
+        const browserStatus = document.getElementById('browser-status');
+        const agentStatus = document.getElementById('agent-status');
+        const providerSelect = document.getElementById('provider-select');
+        const modelSelect = document.getElementById('model-select');
+        const selectModelBtn = document.getElementById('select-model-btn');
+        const modelInfo = document.getElementById('model-info');
+        const modelStatus = document.getElementById('model-status');
+
+        // Global variables
+        let availableProviders = {};
+        let selectedProvider = '';
+        let selectedModel = '';
+
+        // Socket event handlers
+        socket.on('connect', function() {
+            addLogEntry('INFO', '🔌 Connected to server');
+            updateStatus();
+        });
+
+        socket.on('log_message', function(data) {
+            addLogEntry(data.level, data.message);
+        });
+
+        socket.on('task_started', function(data) {
+            isTaskRunning = true;
+            updateUIForRunningTask();
+            progressBar.classList.add('progress-indeterminate');
+            addLogEntry('INFO', `🚀 Task started: ${data.prompt}`);
+            // Start more frequent memory updates during task execution
+            if (window.taskMemoryInterval) clearInterval(window.taskMemoryInterval);
+            window.taskMemoryInterval = setInterval(updateMemoryDisplay, 5000); // Every 5 seconds during task
+        });
+
+        socket.on('task_completed', function(data) {
+            isTaskRunning = false;
+            updateUIForIdleTask();
+            progressBar.classList.remove('progress-indeterminate');
+            
+            // Stop frequent memory updates
+            if (window.taskMemoryInterval) {
+                clearInterval(window.taskMemoryInterval);
+                window.taskMemoryInterval = null;
+            }
+            
+            if (data.success) {
+                addLogEntry('INFO', `✅ Task completed! Steps: ${data.steps}`);
+            } else {
+                addLogEntry('ERROR', `❌ Task failed: ${data.error}`);
+            }
+            updateMemoryDisplay(); // Final memory update
+        });
+
+        socket.on('task_failed', function(data) {
+            isTaskRunning = false;
+            updateUIForIdleTask();
+            progressBar.classList.remove('progress-indeterminate');
+            
+            // Stop frequent memory updates
+            if (window.taskMemoryInterval) {
+                clearInterval(window.taskMemoryInterval);
+                window.taskMemoryInterval = null;
+            }
+            
+            addLogEntry('ERROR', `❌ Task failed: ${data.error}`);
+            updateMemoryDisplay(); // Show idle state
+        });
+
+        socket.on('task_stopped', function(data) {
+            isTaskRunning = false;
+            updateUIForIdleTask();
+            progressBar.classList.remove('progress-indeterminate');
+            
+            // Stop frequent memory updates
+            if (window.taskMemoryInterval) {
+                clearInterval(window.taskMemoryInterval);
+                window.taskMemoryInterval = null;
+            }
+            
+            addLogEntry('INFO', `🛑 Task stopped: ${data.message}`);
+            updateMemoryDisplay(); // Show idle state
+        });
+
+        socket.on('status_update', function(data) {
+            updateStatusDisplay(data);
+        });
+
+        // Functions
+        function addLogEntry(level, message) {
+            const timestamp = new Date().toLocaleTimeString();
+            const logEntry = document.createElement('div');
+            logEntry.className = 'log-entry';
+            logEntry.innerHTML = `
+                <span class="log-timestamp">[${timestamp}]</span>
+                <span class="log-level-${level}">${message}</span>
+            `;
+            outputArea.appendChild(logEntry);
+            outputArea.scrollTop = outputArea.scrollHeight;
+        }
+
+        function updateStatus() {
+            fetch('/api/status')
+                .then(response => response.json())
+                .then(data => updateStatusDisplay(data))
+                .catch(error => console.error('Status update failed:', error));
+        }
+
+        function updateStatusDisplay(data) {
+            // Current Model
+            if (data.current_model) {
+                currentModelDisplay.textContent = data.current_model;
+                currentModelDisplay.className = 'status-value status-connected';
+            } else {
+                currentModelDisplay.textContent = 'Not Selected';
+                currentModelDisplay.className = 'status-value status-error';
+            }
+
+            // LLM Status
+            llmStatus.textContent = data.llm_status === 'connected' ? 'Connected ✅' : 'Disconnected ❌';
+            llmStatus.className = `status-value ${data.llm_status === 'connected' ? 'status-connected' : 'status-error'}`;
+
+            // Browser Status
+            browserStatus.textContent = data.browser_status === 'running' ? 'Running 🔄' : 'Ready ✅';
+            browserStatus.className = `status-value ${data.browser_status === 'running' ? 'status-running' : 'status-connected'}`;
+
+            // Agent Status
+            agentStatus.textContent = data.agent_status === 'running' ? 'Running 🔄' : 'Idle 💤';
+            agentStatus.className = `status-value ${data.agent_status === 'running' ? 'status-running' : 'status-idle'}`;
+
+            isTaskRunning = data.task_running;
+            if (isTaskRunning) {
+                updateUIForRunningTask();
+            } else {
+                updateUIForIdleTask();
+            }
+        }
+
+        function updateMemoryDisplay() {
+            // Only update memory during task execution to reduce API calls
+            if (!isTaskRunning) {
+                // Show idle state without making API call
+                const memoryHtml = `
+                    <div style="color: #ffd700;">🧠 MEMORY SYSTEM</div>
+                    <div style="margin: 10px 0;">================================</div>
+                    <div>📝 Task Memory: Idle</div>
+                    <div>🎯 Autocomplete Events: 0</div>
+                    <div>🛑 Should Break Sequence: false</div>
+                    <div style="margin: 10px 0;">================================</div>
+                    <div style="opacity: 0.7;">No active task - memory in idle state</div>
+                `;
+                memoryArea.innerHTML = memoryHtml;
+                return;
+            }
+
+            fetch('/api/memory')
+                .then(response => response.json())
+                .then(data => {
+                    let memoryHtml = '<div style="color: #ffd700;">🧠 MEMORY SYSTEM</div>';
+                    memoryHtml += '<div style="margin: 10px 0;">================================</div>';
+                    
+                    // Task Memory
+                    if (data.task_memory && Object.keys(data.task_memory).length > 0) {
+                        memoryHtml += '<div>📝 Task Memory:</div>';
+                        for (const [key, value] of Object.entries(data.task_memory)) {
+                            memoryHtml += `<div style="margin-left: 15px;">• ${key}: ${value}</div>`;
+                        }
+                    } else {
+                        memoryHtml += '<div>📝 Task Memory: Empty</div>';
+                    }
+
+                    // Autocomplete Events
+                    memoryHtml += `<div>🎯 Autocomplete Events: ${data.total_events || 0}</div>`;
+                    if (data.autocomplete_events && data.autocomplete_events.length > 0) {
+                        memoryHtml += '<div style="margin: 5px 0;">Recent events:</div>';
+                        data.autocomplete_events.slice(-3).forEach(event => {
+                            const status = event.detected ? 'DETECTED ✅' : 'NONE ❌';
+                            memoryHtml += `<div style="margin-left: 15px; font-size: 11px;">• Element ${event.element_index}: "${event.text}" -> ${status}</div>`;
+                        });
+                    }
+
+                    memoryHtml += `<div>🛑 Should Break Sequence: ${data.should_break_sequence || false}</div>`;
+                    memoryHtml += '<div style="margin: 10px 0;">================================</div>';
+                    
+                    // Show error if present but don't fail
+                    if (data.error) {
+                        memoryHtml += `<div style="color: #f59e0b; font-size: 11px;">Warning: ${data.error}</div>`;
+                    }
+                    
+                    memoryArea.innerHTML = memoryHtml;
+                })
+                .catch(error => {
+                    console.error('Memory update failed:', error);
+                    memoryArea.innerHTML = '<div style="color: #ef4444;">⚠️ Memory update failed - check console</div>';
+                });
+        }
+
+        function updateUIForRunningTask() {
+            runBtn.disabled = true;
+            runBtn.className = 'btn-primary btn-disabled';
+            stopBtn.disabled = false;
+            stopBtn.className = 'btn-secondary';
+        }
+
+        function updateUIForIdleTask() {
+            runBtn.disabled = false;
+            runBtn.className = 'btn-primary';
+            stopBtn.disabled = true;
+            stopBtn.className = 'btn-secondary btn-disabled';
+        }
+
+        function setQuickTask(task) {
+            promptInput.value = task;
+        }
+
+        function runTask() {
+            if (isTaskRunning) return;
+
+            const prompt = promptInput.value.trim();
+            if (!prompt) {
+                alert('Please enter a task prompt');
+                return;
+            }
+
+            const maxSteps = parseInt(document.getElementById('max-steps').value);
+            const headless = document.getElementById('headless').checked;
+
+            fetch('/api/run_task', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    prompt: prompt,
+                    max_steps: maxSteps,
+                    headless: headless
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    addLogEntry('ERROR', `❌ ${data.error}`);
+                } else {
+                    addLogEntry('INFO', `📤 Task submitted: ${data.prompt}`);
+                }
+            })
+            .catch(error => {
+                addLogEntry('ERROR', `❌ Failed to start task: ${error}`);
+            });
+        }
+
+        function stopTask() {
+            if (!isTaskRunning) return;
+
+            fetch('/api/stop_task', {
+                method: 'POST',
+            })
+            .then(response => response.json())
+            .then(data => {
+                addLogEntry('INFO', `🛑 ${data.message}`);
+            })
+            .catch(error => {
+                addLogEntry('ERROR', `❌ Failed to stop task: ${error}`);
+            });
+        }
+
+        // Model selection functions
+        function loadProviders() {
+            fetch('/api/providers')
+                .then(response => response.json())
+                .then(data => {
+                    availableProviders = data;
+                    populateProviderDropdown();
+                    // Load saved settings after providers are loaded
+                    loadSavedSettings();
+                })
+                .catch(error => {
+                    addLogEntry('ERROR', `❌ Failed to load providers: ${error}`);
+                });
+        }
+
+        function loadSavedSettings() {
+            fetch('/api/saved_settings')
+                .then(response => response.json())
+                .then(settings => {
+                    if (settings.provider && settings.model) {
+                        addLogEntry('INFO', `📄 Loading saved settings: ${settings.provider} - ${settings.model}`);
+                        
+                        // Set provider dropdown
+                        providerSelect.value = settings.provider;
+                        selectedProvider = settings.provider;
+                        
+                        if (selectedProvider && availableProviders[selectedProvider]) {
+                            populateModelDropdown();
+                            
+                            // Set model dropdown
+                            modelSelect.value = settings.model;
+                            selectedModel = settings.model;
+                            
+                            if (selectedModel) {
+                                selectModelBtn.disabled = false;
+                                selectModelBtn.className = 'btn-primary';
+                                selectModelBtn.textContent = '🔄 Auto-connecting...';
+                                
+                                // Auto-connect to saved model
+                                setTimeout(selectModel, 1000);
+                            }
+                        }
+                    }
+                })
+                .catch(error => {
+                    console.log('No saved settings found:', error);
+                });
+        }
+
+        function populateProviderDropdown() {
+            providerSelect.innerHTML = '<option value="">Select Provider...</option>';
+            
+            for (const [providerId, config] of Object.entries(availableProviders)) {
+                const option = document.createElement('option');
+                option.value = providerId;
+                
+                let displayName = config.name;
+                if (config.requires_api_key && !config.has_api_key) {
+                    displayName += ' (API Key Required)';
+                    option.disabled = true;
+                    option.style.color = '#999';
+                } else if (config.requires_api_key && config.has_api_key) {
+                    displayName += ' ✅';
+                }
+                
+                option.textContent = displayName;
+                providerSelect.appendChild(option);
+            }
+        }
+
+        function onProviderChange() {
+            selectedProvider = providerSelect.value;
+            selectedModel = '';
+            
+            if (selectedProvider && availableProviders[selectedProvider]) {
+                populateModelDropdown();
+                modelSelect.disabled = false;
+            } else {
+                modelSelect.innerHTML = '<option value="">Select Model...</option>';
+                modelSelect.disabled = true;
+                selectModelBtn.disabled = true;
+                selectModelBtn.className = 'btn-primary btn-disabled';
+            }
+        }
+
+        function populateModelDropdown() {
+            modelSelect.innerHTML = '<option value="">Select Model...</option>';
+            
+            const provider = availableProviders[selectedProvider];
+            if (provider && provider.models) {
+                provider.models.forEach(model => {
+                    const option = document.createElement('option');
+                    option.value = model;
+                    option.textContent = model;
+                    modelSelect.appendChild(option);
+                });
+            }
+        }
+
+        function onModelChange() {
+            selectedModel = modelSelect.value;
+            
+            if (selectedModel) {
+                selectModelBtn.disabled = false;
+                selectModelBtn.className = 'btn-primary';
+            } else {
+                selectModelBtn.disabled = true;
+                selectModelBtn.className = 'btn-primary btn-disabled';
+            }
+        }
+
+        function selectModel() {
+            if (!selectedProvider || !selectedModel) return;
+
+            addLogEntry('INFO', `🔗 Connecting to ${selectedProvider} - ${selectedModel}...`);
+            
+            selectModelBtn.disabled = true;
+            selectModelBtn.textContent = '🔄 Connecting...';
+            
+            fetch('/api/select_model', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    provider: selectedProvider,
+                    model: selectedModel
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    addLogEntry('ERROR', `❌ ${data.error}`);
+                    modelInfo.style.display = 'block';
+                    modelStatus.textContent = `❌ ${data.error}`;
+                    modelStatus.style.color = '#ef4444';
+                } else {
+                    addLogEntry('INFO', `✅ ${data.message}`);
+                    if (data.saved) {
+                        addLogEntry('INFO', `💾 Settings saved - will auto-load next time`);
+                    }
+                    modelInfo.style.display = 'block';
+                    modelStatus.textContent = `✅ ${selectedProvider} - ${selectedModel} connected`;
+                    modelStatus.style.color = '#4ade80';
+                    
+                    // Update status
+                    updateStatus();
+                }
+            })
+            .catch(error => {
+                addLogEntry('ERROR', `❌ Model selection failed: ${error}`);
+                modelInfo.style.display = 'block';
+                modelStatus.textContent = `❌ Connection failed`;
+                modelStatus.style.color = '#ef4444';
+            })
+            .finally(() => {
+                selectModelBtn.disabled = false;
+                selectModelBtn.textContent = '🔗 Connect Model';
+            });
+        }
+
+        // Initialize
+        updateStatus();
+        loadProviders();
+        setInterval(updateStatus, 10000); // Update status every 10 seconds (reduced from 5)
+        setInterval(updateMemoryDisplay, 15000); // Update memory every 15 seconds (reduced from 3)
+    </script>
+</body>
+</html>
