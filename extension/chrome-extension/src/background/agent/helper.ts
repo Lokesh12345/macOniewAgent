@@ -291,30 +291,30 @@ export function createChatModel(providerConfig: ProviderConfig, modelConfig: Mod
       return new ChatCerebras(args);
     }
     case ProviderTypeEnum.Ollama: {
+      // Use OpenAI-compatible API for better compatibility
       const args: {
         model: string;
-        apiKey?: string;
-        baseUrl: string;
-        modelKwargs?: { max_completion_tokens: number };
+        apiKey: string;
+        baseURL: string;
         topP?: number;
         temperature?: number;
         maxTokens?: number;
-        numCtx: number;
+        configuration?: {
+          dangerouslyAllowBrowser?: boolean;
+        };
       } = {
         model: modelConfig.modelName,
-        // required but ignored by ollama
-        apiKey: providerConfig.apiKey === '' ? 'ollama' : providerConfig.apiKey,
-        baseUrl: providerConfig.baseUrl ?? 'http://localhost:11434',
+        // Dummy API key for local Ollama (ignored by server)
+        apiKey: 'ollama-local-dummy-key',
+        baseURL: (providerConfig.baseUrl ?? 'http://localhost:11434') + '/v1',
         topP,
         temperature,
         maxTokens,
-        // ollama usually has a very small context window, so we need to set a large number for agent to work
-        // It was set to 128000 in the original code, but it will cause ollama reload the models frequently if you have multiple models working together
-        // not sure why, but setting it to 64000 seems to work fine
-        // TODO: configure the context window size in model config
-        numCtx: 64000,
+        configuration: {
+          dangerouslyAllowBrowser: true,
+        },
       };
-      return new ChatOllama(args);
+      return new ChatOpenAI(args);
     }
     case ProviderTypeEnum.OpenRouter: {
       // Call the helper function, passing OpenRouter headers via the third argument

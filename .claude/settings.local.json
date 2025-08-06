@@ -26,7 +26,12 @@
       "Bash(xcodebuild:*)",
       "mcp__ide__getDiagnostics",
       "Bash(grep:*)",
-      "Bash(npm run build:*)"
+      "Bash(npm run build:*)",
+      "WebFetch(domain:huggingface.co)",
+      "WebFetch(domain:openai.com)",
+      "WebFetch(domain:cookbook.openai.com)",
+      "WebFetch(domain:github.com)",
+      "Bash(OLLAMA_ORIGINS:*)"
     ],
     "deny": []
   }
