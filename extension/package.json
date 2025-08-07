@@ -1,12 +1,8 @@
 {
-  "name": "nanobrowser",
+  "name": "oniew",
   "version": "0.1.8",
-  "description": "AI web automation tool",
+  "description": "Agent",
   "license": "Apache-2.0",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/nanobrowser/nanobrowser.git"
-  },
   "type": "module",
   "scripts": {
     "clean:bundle": "rimraf dist && turbo clean:bundle",

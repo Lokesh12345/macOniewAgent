@@ -189,7 +189,7 @@ export class DOMElementNode extends DOMBaseNode {
     return textParts.join('\n').trim();
   }
 
-  clickableElementsToString(includeAttributes: string[] = []): string {
+  clickableElementsToString(includeAttributes: string[] = [], includeAllAttributes: boolean = false): string {
     const formattedText: string[] = [];
 
     const processNode = (node: DOMBaseNode, depth: number): void => {
@@ -204,14 +204,22 @@ export class DOMElementNode extends DOMBaseNode {
           const text = node.getAllTextTillNextClickableElement();
           let attributesHtmlStr = '';
 
-          if (includeAttributes.length) {
+          if (includeAttributes.length || includeAllAttributes) {
             // Create a new object to store attributes
             const attributesToInclude: Record<string, string> = {};
 
-            for (const key of includeAttributes) {
-              // Include the attribute even if it's an empty string
-              if (key in node.attributes) {
-                attributesToInclude[key] = String(node.attributes[key]);
+            if (includeAllAttributes) {
+              // Include ALL attributes when in full mode
+              for (const [key, value] of Object.entries(node.attributes)) {
+                attributesToInclude[key] = String(value);
+              }
+            } else {
+              // Include only specified attributes (current behavior)
+              for (const key of includeAttributes) {
+                // Include the attribute even if it's an empty string
+                if (key in node.attributes) {
+                  attributesToInclude[key] = String(node.attributes[key]);
+                }
               }
             }
 

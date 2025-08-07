@@ -48,6 +48,24 @@ export const DEFAULT_AGENT_OPTIONS: AgentOptions = {
     'aria-checked',
     'href',
     'tabindex',
+    'data-tooltip',         // Shows tooltips like "Add Cc recipients" or "Send (⌘Enter)"
+    'data-tooltip-delay',   // Tooltip timing behavior
+    'class',                // Gmail classes like "T-I J-J5-Ji aoO v7" indicate button types
+    'id',                  // Element IDs help LLM understand unique elements
+    'aria-autocomplete',   // "list" indicates autocomplete dropdown behavior
+    'aria-haspopup',       // "listbox" shows this will display a dropdown
+    'aria-owns',           // References to related dropdown elements
+    'aria-controls',       // Elements this input controls
+    'aria-description',    // Additional context like "None selected"
+    'peoplekit-id',        // Gmail's people picker component identifier
+    'autocomplete',        // Standard HTML autocomplete behavior
+    'autocapitalize',      // Text input behavior
+    'autocorrect',         // Text correction settings
+    'spellcheck',          // Spell checking behavior
+    'onclick',             // JavaScript click handlers
+    'onsubmit',            // Form submission handlers
+    'jslog',               // Gmail's logging/tracking identifiers
+    'style',               // Inline styles that affect interaction (like user-select: none)
   ],
   planningInterval: 3,
 };

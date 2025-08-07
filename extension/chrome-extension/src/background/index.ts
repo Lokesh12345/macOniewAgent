@@ -223,6 +223,83 @@ chrome.runtime.onConnect.addListener(port => {
             return port.postMessage({ type: 'success', msg: 'highlight removed' });
           }
 
+          case 'debug_dom_analysis': {
+            try {
+              if (!message.tabId) {
+                return port.postMessage({ type: 'error', error: 'No tab ID provided for DOM analysis' });
+              }
+
+              console.log('🔧 Debug: Starting DOM analysis for tab', message.tabId);
+
+              // Ensure initialization
+              await ensureInitialized();
+
+              // Get browser state (this triggers the DOM analysis with our enhanced logging)
+              const browserState = await browserContext.getState(true);
+              // Use full attributes mode for debug to see EVERYTHING
+              const elementsText = browserState.elementTree.clickableElementsToString([], true);
+
+              // Enhanced logging similar to base.ts
+              const lines = elementsText.split('\n');
+              const elementLines = lines.filter(line => line.trim().startsWith('[') && line.includes(']<'));
+              
+              console.log(`\n🎯 DEBUG DOM ANALYZER RESULTS:`);
+              console.log(`📄 Page: ${browserState.url}`);
+              console.log(`🔢 Interactive elements found: ${elementLines.length}`);
+              console.log(`📝 Total DOM text length: ${elementsText.length} chars`);
+              
+              // Search for CC/BCC related elements
+              const ccBccElements = elementLines.filter(line => {
+                const lowerLine = line.toLowerCase();
+                return lowerLine.includes('cc') || lowerLine.includes('bcc') || 
+                       lowerLine.includes('recipients') || lowerLine.includes('add');
+              });
+              
+              console.log(`\n🔍 CC/BCC RELATED ELEMENTS (${ccBccElements.length} found):`);
+              if (ccBccElements.length > 0) {
+                ccBccElements.forEach((line, i) => {
+                  console.log(`  CC${i + 1}. ${line.trim()}`);
+                });
+              } else {
+                console.log(`  ⚠️ NO CC/BCC ELEMENTS FOUND`);
+              }
+              
+              // Show first 10 and last 10 elements
+              console.log(`\n📋 First 10 elements:`);
+              elementLines.slice(0, 10).forEach((line, i) => {
+                console.log(`  ${i + 1}. ${line.trim()}`);
+              });
+              
+              if (elementLines.length > 20) {
+                console.log(`\n📋 Last 10 elements:`);
+                elementLines.slice(-10).forEach((line, i) => {
+                  const actualIndex = elementLines.length - 10 + i + 1;
+                  console.log(`  ${actualIndex}. ${line.trim()}`);
+                });
+              }
+              
+              console.log(`\n===== END DEBUG DOM ANALYZER RESULTS =====\n`);
+
+              // Log results
+              console.log('🔧 Debug: DOM analysis complete');
+              console.log('🔧 Debug: Browser state:', browserState);
+              console.log('🔧 Debug: Elements text length:', elementsText.length);
+
+              return port.postMessage({ 
+                type: 'success', 
+                msg: 'DOM analysis complete. Check browser console for detailed logs.',
+                elementCount: browserState.selectorMap ? browserState.selectorMap.size : 0
+              });
+
+            } catch (error) {
+              console.error('🔧 Debug: Error during DOM analysis:', error);
+              return port.postMessage({ 
+                type: 'error', 
+                error: `DOM analysis failed: ${error instanceof Error ? error.message : String(error)}`
+              });
+            }
+          }
+
           case 'speech_to_text': {
             try {
               if (!message.audio) {

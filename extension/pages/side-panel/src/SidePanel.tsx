@@ -4,6 +4,7 @@ import { RxDiscordLogo } from 'react-icons/rx';
 import { FiSettings } from 'react-icons/fi';
 import { PiPlusBold } from 'react-icons/pi';
 import { GrHistory } from 'react-icons/gr';
+import { BiSearchAlt } from 'react-icons/bi';
 import { type Message, Actors, chatHistoryStore, agentModelStore, generalSettingsStore } from '@extension/storage';
 import favoritesStorage, { type FavoritePrompt } from '@extension/storage/lib/prompt/favorites';
 import MessageList from './components/MessageList';
@@ -998,6 +999,46 @@ const SidePanel = () => {
     }
   };
 
+  // Debug DOM analysis function
+  const handleDebugDOM = async () => {
+    try {
+      console.log('🔧 Debug: Starting DOM analysis...');
+      
+      // Get active tab
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (!tab.id) {
+        console.error('🔧 Debug: No active tab found');
+        return;
+      }
+
+      // Setup connection if not exists
+      if (!portRef.current) {
+        setupConnection();
+      }
+
+      // Send debug DOM analysis message
+      portRef.current?.postMessage({
+        type: 'debug_dom_analysis',
+        tabId: tab.id,
+      });
+      
+      // Add a message to show debug is running
+      appendMessage({
+        actor: Actors.SYSTEM,
+        content: '🔧 Debug: DOM analysis triggered. Check browser console for detailed logs.',
+        timestamp: Date.now(),
+      });
+      
+    } catch (error) {
+      console.error('🔧 Debug: Error triggering DOM analysis:', error);
+      appendMessage({
+        actor: Actors.SYSTEM,
+        content: '🔧 Debug: Error triggering DOM analysis. See console for details.',
+        timestamp: Date.now(),
+      });
+    }
+  };
+
   return (
     <div>
       <div
@@ -1048,6 +1089,16 @@ const SidePanel = () => {
             </a>
             <button
               type="button"
+              onClick={handleDebugDOM}
+              onKeyDown={e => e.key === 'Enter' && handleDebugDOM()}
+              className={`header-icon ${isDarkMode ? 'text-sky-400 hover:text-sky-300' : 'text-sky-400 hover:text-sky-500'} cursor-pointer`}
+              aria-label="Debug DOM Analysis"
+              title="Debug DOM Analysis - Analyze current page DOM"
+              tabIndex={0}>
+              <BiSearchAlt size={20} />
+            </button>
+            <button
+              type="button"
               onClick={() => chrome.runtime.openOptionsPage()}
               onKeyDown={e => e.key === 'Enter' && chrome.runtime.openOptionsPage()}
               className={`header-icon ${isDarkMode ? 'text-sky-400 hover:text-sky-300' : 'text-sky-400 hover:text-sky-500'} cursor-pointer`}
@@ -1086,9 +1137,9 @@ const SidePanel = () => {
               <div
                 className={`flex flex-1 items-center justify-center p-8 ${isDarkMode ? 'text-sky-300' : 'text-sky-600'}`}>
                 <div className="max-w-md text-center">
-                  <img src="/icon-128.png" alt="Nanobrowser Logo" className="mx-auto mb-4 size-12" />
+                  <img src="/icon-128.png" alt="Oniew Logo" className="mx-auto mb-4 size-12" />
                   <h3 className={`mb-2 text-lg font-semibold ${isDarkMode ? 'text-sky-200' : 'text-sky-700'}`}>
-                    Welcome to Nanobrowser!
+                    Welcome to Oniew!
                   </h3>
                   <p className="mb-4">To get started, please configure your API keys in the settings page.</p>
                   <button
@@ -1098,23 +1149,7 @@ const SidePanel = () => {
                     }`}>
                     Open Settings
                   </button>
-                  <div className="mt-4 text-sm opacity-75">
-                    <a
-                      href="https://github.com/nanobrowser/nanobrowser?tab=readme-ov-file#-quick-start"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className={`${isDarkMode ? 'text-sky-400 hover:text-sky-300' : 'text-sky-700 hover:text-sky-600'}`}>
-                      Quick Start Guide
-                    </a>
-                    <span className="mx-2">•</span>
-                    <a
-                      href="https://discord.gg/NN3ABHggMK"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className={`${isDarkMode ? 'text-sky-400 hover:text-sky-300' : 'text-sky-700 hover:text-sky-600'}`}>
-                      Join Our Community
-                    </a>
-                  </div>
+                  
                 </div>
               </div>
             )}

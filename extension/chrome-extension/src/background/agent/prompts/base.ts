@@ -30,6 +30,56 @@ abstract class BasePrompt {
     const browserState = await context.browserContext.getState(context.options.useVision);
     const rawElementsText = browserState.elementTree.clickableElementsToString(context.options.includeAttributes);
 
+    // Enhanced logging to debug CC/BCC field issues
+    const lines = rawElementsText.split('\n');
+    const elementLines = lines.filter(line => line.trim().startsWith('[') && line.includes(']<'));
+    console.log(`\n🎯 DOM ANALYZER RESULTS:`);
+    console.log(`📄 Page: ${browserState.url}`);
+    console.log(`🔢 Interactive elements found: ${elementLines.length}`);
+    console.log(`📝 Total DOM text length: ${rawElementsText.length} chars`);
+    
+    // Search for CC/BCC related elements
+    const ccBccElements = elementLines.filter(line => {
+      const lowerLine = line.toLowerCase();
+      return lowerLine.includes('cc') || lowerLine.includes('bcc') || 
+             lowerLine.includes('recipients') || lowerLine.includes('add');
+    });
+    
+    console.log(`\n🔍 CC/BCC RELATED ELEMENTS (${ccBccElements.length} found):`);
+    if (ccBccElements.length > 0) {
+      ccBccElements.forEach((line, i) => {
+        console.log(`  CC${i + 1}. ${line.trim()}`);
+      });
+    } else {
+      console.log(`  ⚠️ NO CC/BCC ELEMENTS FOUND`);
+    }
+    
+    // Show first 10 and last 10 elements
+    console.log(`\n📋 First 10 elements:`);
+    elementLines.slice(0, 10).forEach((line, i) => {
+      console.log(`  ${i + 1}. ${line.trim()}`);
+    });
+    
+    if (elementLines.length > 20) {
+      console.log(`\n📋 Last 10 elements:`);
+      elementLines.slice(-10).forEach((line, i) => {
+        const actualIndex = elementLines.length - 10 + i + 1;
+        console.log(`  ${actualIndex}. ${line.trim()}`);
+      });
+    }
+    
+    // Show ALL element data for debugging - expose it globally
+    (window as any).DEBUG_DOM_DATA = {
+      url: browserState.url,
+      elementCount: elementLines.length,
+      allElements: elementLines,
+      ccBccElements: ccBccElements,
+      fullDomText: rawElementsText
+    };
+    
+    console.log(`\n💾 Full DOM data saved to window.DEBUG_DOM_DATA for manual inspection`);
+    console.log(`===== END DOM ANALYZER RESULTS =====\n`);
+
     let formattedElementsText = '';
     if (rawElementsText !== '') {
       const scrollInfo = `[Scroll info of current page] window.scrollY: ${browserState.scrollY}, document.body.scrollHeight: ${browserState.scrollHeight}, window.visualViewport.height: ${browserState.visualViewportHeight}, visual viewport height as percentage of scrollable distance: ${Math.round((browserState.visualViewportHeight / (browserState.scrollHeight - browserState.visualViewportHeight)) * 100)}%\n`;
