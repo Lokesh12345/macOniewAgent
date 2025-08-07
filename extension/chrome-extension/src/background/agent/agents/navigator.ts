@@ -364,8 +364,8 @@ export class NavigatorAgent extends BaseAgent<z.ZodType, NavigatorResult> {
     }));
 
     const browserContext = this.context.browserContext;
-    const browserState = await browserContext.getState(this.context.options.useVision);
-    const cachedPathHashes = await calcBranchPathHashSet(browserState);
+    let browserState = await browserContext.getState(this.context.options.useVision);
+    let cachedPathHashes = await calcBranchPathHashSet(browserState);
 
     await browserContext.removeHighlight();
 
@@ -384,6 +384,14 @@ export class NavigatorAgent extends BaseAgent<z.ZodType, NavigatorResult> {
         }
 
         const indexArg = actionInstance.getIndexArg(actionArgs);
+        
+        // Re-analyze DOM before each action that uses indices to ensure we have fresh element references
+        if (indexArg !== null && i > 0) {
+          console.log(`🔄 RE-ANALYZING DOM before action ${i+1} (${actionName}) to ensure fresh indices`);
+          browserState = await browserContext.getState(this.context.options.useVision);
+          cachedPathHashes = await calcBranchPathHashSet(browserState);
+        }
+        
         if (i > 0 && indexArg !== null) {
           // Check if previous action handled DOM changes - skip obstruction detection
           const previousResult = results[results.length - 1];
@@ -436,6 +444,8 @@ export class NavigatorAgent extends BaseAgent<z.ZodType, NavigatorResult> {
 
         // if the action has an index argument, record the interacted element to the result
         if (indexArg !== null) {
+          // IMPORTANT: Always use the current browserState that was potentially refreshed above
+          // This ensures we're recording the actual element that was interacted with, not a stale reference
           const domElement = browserState.selectorMap.get(indexArg);
           if (domElement) {
             const interactedElement = HistoryTreeProcessor.convertDomElementToHistoryElement(domElement);

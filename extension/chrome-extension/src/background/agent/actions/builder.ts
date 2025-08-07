@@ -225,6 +225,8 @@ export class ActionBuilder {
         this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_START, intent);
 
         const page = await this.context.browserContext.getCurrentPage();
+        // IMPORTANT: Always get fresh state to ensure we have current DOM indices
+        // This is critical after DOM changes like autocomplete dropdowns
         const state = await page.getState();
 
         const elementNode = state?.selectorMap.get(input.index);
@@ -312,10 +314,84 @@ export class ActionBuilder {
         this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_START, intent);
 
         const page = await this.context.browserContext.getCurrentPage();
+        // IMPORTANT: Always get fresh state to ensure we have current DOM indices
+        // This is critical after DOM changes like autocomplete dropdowns
         const state = await page.getState();
 
         const elementNode = state?.selectorMap.get(input.index);
         console.log(`🔍 INPUT_TEXT: index ${input.index}, text:"${input.text}" - ${elementNode ? 'FOUND' : 'MISSING'} (${elementNode?.tagName || 'none'})`);
+        
+        // Enhanced semantic field identification
+        if (elementNode) {
+          const attributes = elementNode.attributes;
+          console.log(`🎯 FIELD DETAILS: name="${attributes.name || 'none'}" aria-label="${attributes['aria-label'] || 'none'}" placeholder="${attributes.placeholder || 'none'}" role="${attributes.role || 'none'}" id="${attributes.id || 'none'}"`);
+          
+          // Dynamic field validation using pattern-based detection
+          const detectFieldType = (attrs: Record<string, string>, tag: string) => {
+            const createAttributeString = (attrs: Record<string, string>) => 
+              Object.entries(attrs)
+                .filter(([_, value]) => value) // Filter out empty values
+                .map(([key, value]) => `${key}="${value}"`)
+                .join(' ')
+                .toLowerCase();
+            
+            const attrText = createAttributeString(attrs);
+            
+            // Email/recipient field patterns
+            const emailPatterns = [
+              /name=['"]to['"]/,
+              /name=['"]recipients?['"]/,
+              /aria-label=['"]*[^'"]*recipients?[^'"]*['"]/,
+              /placeholder=['"]*[^'"]*email[^'"]*['"]/,
+              /\bto\s/,
+              /\brecipients?\b/
+            ];
+            
+            // Subject field patterns
+            const subjectPatterns = [
+              /name=['"]subject['"]/,
+              /aria-label=['"]*[^'"]*subject[^'"]*['"]/,
+              /placeholder=['"]*[^'"]*subject[^'"]*['"]/,
+              /\bsubject\b/
+            ];
+            
+            // Body/message field patterns
+            const bodyPatterns = [
+              /contenteditable=['"]true['"]/,
+              /role=['"]textbox['"]/,
+              /aria-multiline=['"]true['"]/,
+              /aria-label=['"]*[^'"]*message[^'"]*['"]/,
+              /aria-label=['"]*[^'"]*body[^'"]*['"]/,
+              /\b(body|message|compose|content)\b/
+            ];
+            
+            const isEmail = emailPatterns.some(pattern => pattern.test(attrText));
+            const isSubject = subjectPatterns.some(pattern => pattern.test(attrText));
+            const isBody = bodyPatterns.some(pattern => pattern.test(attrText)) || 
+                          (tag === 'div' && /contenteditable=['"]true['"']/.test(attrText));
+            
+            return { isEmail, isSubject, isBody };
+          };
+          
+          const { isEmail: isEmailField, isSubject: isSubjectField, isBody: isBodyField } = detectFieldType(attributes, elementNode.tagName);
+          
+          console.log(`🎯 FIELD TYPE: email=${isEmailField}, subject=${isSubjectField}, body=${isBodyField}`);
+          
+          // Warn if we're putting content into wrong field type based on content patterns
+          const textLower = input.text.toLowerCase();
+          const isEmailContent = textLower.includes('@') && textLower.includes('.');
+          const isSubjectContent = input.text.length < 200 && !input.text.includes('\n') && !isEmailContent;
+          const isBodyContent = input.text.length > 100 || input.text.includes('\n') || 
+                               (input.text.length > 20 && !isEmailContent && !textLower.match(/^[a-z0-9\s]{1,50}$/i));
+          
+          if (isEmailContent && !isEmailField) {
+            console.log(`⚠️ FIELD MISMATCH: Entering email "${input.text}" into non-email field`);
+          } else if (isSubjectContent && !isSubjectField) {
+            console.log(`⚠️ FIELD MISMATCH: Entering subject "${input.text}" into non-subject field`);  
+          } else if (isBodyContent && !isBodyField) {
+            console.log(`⚠️ FIELD MISMATCH: Entering body "${input.text}" into non-body field`);
+          }
+        }
         
         if (!elementNode) {
           // Instead of failing, provide context about what was accomplished and what needs to be done
@@ -703,6 +779,8 @@ export class ActionBuilder {
         this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_START, intent);
 
         const page = await this.context.browserContext.getCurrentPage();
+        // IMPORTANT: Always get fresh state to ensure we have current DOM indices
+        // This is critical after DOM changes like autocomplete dropdowns
         const state = await page.getState();
 
         const elementNode = state?.selectorMap.get(input.index);
@@ -773,6 +851,8 @@ export class ActionBuilder {
         this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_START, intent);
 
         const page = await this.context.browserContext.getCurrentPage();
+        // IMPORTANT: Always get fresh state to ensure we have current DOM indices
+        // This is critical after DOM changes like autocomplete dropdowns
         const state = await page.getState();
 
         const elementNode = state?.selectorMap.get(input.index);

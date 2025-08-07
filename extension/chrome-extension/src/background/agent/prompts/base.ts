@@ -68,8 +68,8 @@ abstract class BasePrompt {
       });
     }
     
-    // Show ALL element data for debugging - expose it globally
-    (window as any).DEBUG_DOM_DATA = {
+    // Show ALL element data for debugging
+    const debugData = {
       url: browserState.url,
       elementCount: elementLines.length,
       allElements: elementLines,
@@ -77,7 +77,90 @@ abstract class BasePrompt {
       fullDomText: rawElementsText
     };
     
-    console.log(`\n💾 Full DOM data saved to window.DEBUG_DOM_DATA for manual inspection`);
+    console.log(`\n💾 Full DOM data available for debugging`);
+    
+    // Add semantic field analysis for form filling
+    const formFields = elementLines.filter(line => {
+      const lowerLine = line.toLowerCase();
+      return (lowerLine.includes('type=\'text\'') || 
+              lowerLine.includes('role=\'textbox\'') ||
+              lowerLine.includes('role=\'combobox\'') ||
+              lowerLine.includes('contenteditable=\'true\'')) &&
+             (lowerLine.includes('aria-label') || lowerLine.includes('name=') || lowerLine.includes('placeholder'));
+    });
+    
+    if (formFields.length > 0) {
+      console.log(`\n📝 SEMANTIC FORM FIELDS (${formFields.length} found):`);
+      formFields.forEach((line, i) => {
+        const indexMatch = line.match(/\[(\d+)\]/);
+        const index = indexMatch ? indexMatch[1] : 'unknown';
+        
+        // Extract key semantic attributes
+        const ariaLabel = line.match(/aria-label='([^']*)'/) || line.match(/aria-label="([^"]*)"/);
+        const name = line.match(/name='([^']*)'/) || line.match(/name="([^"]*)"/);
+        const placeholder = line.match(/placeholder='([^']*)'/) || line.match(/placeholder="([^"]*)"/);
+        
+        let fieldType = 'unknown';
+        const lineData = line.toLowerCase();
+        
+        // Dynamic field type detection using pattern matching
+        const detectFieldType = (data: string) => {
+          // Email/recipient patterns - look for multiple indicators
+          if (/\b(recipients?|to\s|email|address|mailto)\b/i.test(data) || 
+              /aria-label=['"].*?(recipients?|to\s|email)['"]/.test(data)) {
+            return '📧 EMAIL';
+          }
+          
+          // Subject patterns
+          if (/\b(subject)\b/i.test(data) || 
+              /aria-label=['"].*?subject['"]/.test(data)) {
+            return '📋 SUBJECT';
+          }
+          
+          // Body/message patterns - check for contenteditable or message-related terms
+          if (/contenteditable=['"]true['"]/i.test(data) ||
+              /\b(body|message|compose|content)\b/i.test(data) ||
+              /role=['"]textbox['"]/i.test(data)) {
+            return '📝 BODY';
+          }
+          
+          // Search patterns
+          if (/\b(search|query|find)\b/i.test(data)) {
+            return '🔍 SEARCH';
+          }
+          
+          // Password patterns
+          if (/\b(password|pass)\b/i.test(data) || /type=['"]password['"]/i.test(data)) {
+            return '🔒 PASSWORD';
+          }
+          
+          // Username patterns
+          if (/\b(username|user|login)\b/i.test(data)) {
+            return '👤 USERNAME';
+          }
+          
+          // Phone patterns
+          if (/\b(phone|tel|mobile)\b/i.test(data) || /type=['"]tel['"]/i.test(data)) {
+            return '📞 PHONE';
+          }
+          
+          // Name patterns
+          if (/\b(name|firstname|lastname)\b/i.test(data)) {
+            return '👥 NAME';
+          }
+          
+          return '📄 TEXT';
+        };
+        
+        fieldType = detectFieldType(lineData);
+        
+        console.log(`  FIELD${i + 1}[${index}]: ${fieldType}`);
+        if (ariaLabel) console.log(`    └─ aria-label: "${ariaLabel[1]}"`);
+        if (name) console.log(`    └─ name: "${name[1]}"`);
+        if (placeholder) console.log(`    └─ placeholder: "${placeholder[1]}"`);
+      });
+    }
+    
     console.log(`===== END DOM ANALYZER RESULTS =====\n`);
 
     let formattedElementsText = '';

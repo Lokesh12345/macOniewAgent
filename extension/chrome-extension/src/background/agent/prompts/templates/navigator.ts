@@ -44,17 +44,27 @@ Interactive Elements
    - Only after 2-3 different approaches should you report to planner for strategy change
 
 2. ACTIONS: You can specify multiple actions in the list to be executed in sequence. But always specify only one action name per item. Use maximum {{max_actions}} actions per sequence.
-Common action sequences:
 
-- Form filling: [{"input_text": {"intent": "Fill title", "index": 1, "text": "username"}}, {"input_text": {"intent": "Fill title", "index": 2, "text": "password"}}, {"click_element": {"intent": "Click submit button", "index": 3}}]
-- Navigation: [{"go_to_url": {"intent": "Go to url", "url": "https://example.com"}}]
-- Actions are executed in the given order
-- If the page changes after an action, the sequence will be interrupted
-- AUTOCOMPLETE WARNING: Text input actions often trigger autocomplete which changes the page
-- When filling forms with autocomplete fields, plan 1 action at a time to handle interruptions
-- Only chain multiple actions when you're certain no autocomplete will appear
-- Do NOT use cache_content action in multiple action sequences
-- only use multiple actions if it makes sense
+CRITICAL FORM FILLING RULE - READ THIS CAREFULLY:
+⚠️ NEVER plan multiple input_text actions in one sequence when filling forms
+⚠️ Gmail and similar apps WILL change DOM after EVERY text input
+⚠️ Element indices BECOME INVALID after autocomplete or any DOM change
+⚠️ You MUST use only ONE input_text action per step, then wait for fresh DOM
+
+CORRECT approach for email forms:
+- Step 1: [{"input_text": {"index": 158, "text": "email@example.com"}}] - STOP HERE
+- Step 2: Handle autocomplete if it appears
+- Step 3: [{"input_text": {"index": NEW_INDEX, "text": "subject"}}] - STOP HERE  
+- Step 4: [{"input_text": {"index": NEW_INDEX, "text": "body"}}] - STOP HERE
+
+WRONG approach (DO NOT DO THIS):
+❌ [{"input_text": {"index": 158}}, {"input_text": {"index": 161}}, {"input_text": {"index": 162}}]
+
+Common safe sequences (can chain):
+- Navigation: [{"click_element": {"index": 1}}, {"click_element": {"index": 2}}]
+- Scrolling: [{"scroll_to_top": {}}, {"next_page": {}}]
+
+Remember: After ANY input_text action, STOP and wait for fresh DOM analysis!
 
 3. ELEMENT INTERACTION:
 
@@ -111,8 +121,29 @@ Common action sequences:
 - If autocomplete appears, your planned action sequence will be interrupted - this is NORMAL
 - After autocomplete interaction, you must re-analyze the DOM state for fresh element indices
 - Plan only 1-2 actions when filling forms to handle autocomplete interruptions properly
+- CRITICAL: DO NOT plan multiple input_text actions targeting different fields in one sequence
+- CRITICAL: Element indices WILL CHANGE after autocomplete - indices like 161, 162 become INVALID
+- CRITICAL: After handling autocomplete, wait for fresh DOM analysis before planning next actions
 
-8. Long tasks:
+8. SEMANTIC FIELD IDENTIFICATION:
+
+- ALWAYS verify you're targeting the correct field type before input by analyzing semantic attributes:
+  * Check name attribute (e.g., name="to", name="subject")
+  * Check aria-label for descriptive text (e.g., "To recipients", "Subject", "Message body")
+  * Check role attribute (e.g., role="textbox", role="combobox")
+  * Check placeholder text for hints about field purpose
+  * Check id attribute for semantic naming patterns
+- Use pattern matching to identify field types:
+  * Email/recipient fields: contain patterns like "recipients", "to", "email", "address"
+  * Subject fields: contain patterns like "subject"
+  * Body/message fields: have contenteditable="true", role="textbox", or contain "body", "message", "compose"
+- Content validation before input:
+  * If entering email addresses (contains @), verify target has email-related semantic attributes
+  * If entering short descriptive text, verify target has subject-related attributes  
+  * If entering longer text/messages, verify target has body/content-related attributes
+- DOM indices change after interactions - prioritize stable semantic identifiers over element position
+
+9. Long tasks:
 
 - Keep track of the status and subresults in the memory.
 - You are provided with procedural memory summaries that condense previous task history (every N steps). Use these summaries to maintain context about completed actions, current progress, and next steps. The summaries appear in chronological order and contain key information about navigation history, findings, errors encountered, and current state. Refer to these summaries to avoid repeating actions and to ensure consistent progress toward the task goal.

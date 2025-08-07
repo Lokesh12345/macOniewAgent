@@ -27,7 +27,9 @@
       "mcp__ide__getDiagnostics",
       "Bash(grep:*)",
       "Bash(npm run build:*)",
-      "Bash(python3:*)"
+      "Bash(python3:*)",
+      "Bash(pnpm type-check:*)",
+      "Bash(pnpm run:*)"
     ],
     "deny": []
   }

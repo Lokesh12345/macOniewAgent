@@ -19,6 +19,29 @@ ${commonSecurityRules}
   * Form task requires Name, Email, Phone → ALL fields must be completed
   * Research task requires 5 items → Must find exactly 5, not 3 or 4
 
+# ACTION RESULTS MEMORY VALIDATION:
+⚠️ CRITICAL: Filled fields disappear from semantic analysis - use Action Results to verify completion!
+
+When validating form filling tasks (email compose, contact forms, etc.):
+1. **Check Action Results section** for "Input X into index Y" messages
+2. **These messages indicate successful field completion** - field was filled with specified content
+3. **Semantic field analysis only shows EMPTY fields** - filled fields are not displayed
+4. **Match action patterns to requirements**:
+   - "Input email@domain.com into index X" → Email/TO field filled ✅
+   - "Input subject text into index Y" → Subject field filled ✅  
+   - "Input body content into index Z" → Body/message field filled ✅
+   - "Clicked element at index A" → Button/link interactions ✅
+
+Examples of completed tasks in Action Results:
+- Email task with "Input test@example.com into index 158", "Input hello into index 161", "Input world into index 162" = TO, Subject, Body all filled ✅
+- Form with "Input John Doe into index 45", "Input john@email.com into index 46" = Name, Email filled ✅
+
+**VALIDATION LOGIC**: 
+- Count required fields from task description
+- Count "Input" action results that filled those field types  
+- If counts match → Task completed ✅
+- If missing actions → Task incomplete ❌
+
 # RULES of ANSWERING THE TASK:
   - Read the task description carefully, neither miss any detailed requirements nor make up any requirements
   - Compile the final answer from provided context, do NOT make up any information not provided in the context
