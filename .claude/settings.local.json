@@ -29,7 +29,18 @@
       "Bash(npm run build:*)",
       "Bash(python3:*)",
       "Bash(pnpm type-check:*)",
-      "Bash(pnpm run:*)"
+      "Bash(pnpm run:*)",
+      "Bash(ollama list:*)",
+      "Bash(ollama run:*)",
+      "Bash(ollama stop:*)",
+      "Bash(ollama ps:*)",
+      "Bash(timeout 60 python3:*)",
+      "Bash(gtimeout:*)",
+      "Bash(git checkout:*)",
+      "Bash(swift test-websocket-frames.swift:*)",
+      "Bash(ps:*)",
+      "WebFetch(domain:developer.chrome.com)",
+      "WebFetch(domain:github.com)"
     ],
     "deny": []
   }

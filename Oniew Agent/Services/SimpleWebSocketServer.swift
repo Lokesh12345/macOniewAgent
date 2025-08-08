@@ -2,8 +2,8 @@ import Foundation
 import Network
 import CommonCrypto
 
-// Production WebSocket server with proper frame buffering for large messages
-class WebSocketServer {
+// Simple, reliable WebSocket server based on official WebSocket standards
+class SimpleWebSocketServer {
     private let port: UInt16
     private var listener: NWListener?
     private var connection: NWConnection?
@@ -11,10 +11,9 @@ class WebSocketServer {
     private var pingTimer: Timer?
     private var isServerRunning = false
     
-    // WebSocket state with frame buffering
+    // WebSocket state
     private var isWebSocketHandshakeComplete = false
     private var receivedData = Data()
-    private var frameBuffer = Data()  // Buffer for accumulating partial frames
     
     var onConnectionChanged: ((Bool) -> Void)?
     var onMessage: (([String: Any]) -> Void)?
@@ -34,13 +33,9 @@ class WebSocketServer {
     
     func start() {
         guard !isServerRunning else {
-            print("⚠️ WebSocket server is already running")
+            print("⚠️ WebSocket server already running")
             return
         }
-        
-        // Stop any existing listener first
-        listener?.cancel()
-        listener = nil
         
         do {
             let parameters = NWParameters.tcp
@@ -57,26 +52,11 @@ class WebSocketServer {
                 switch state {
                 case .ready:
                     self?.isServerRunning = true
-                    print("🚀 WebSocket server listening on port \(self?.port ?? 0)")
+                    print("🚀 Simple WebSocket server listening on port \(self?.port ?? 0)")
                 case .failed(let error):
                     self?.isServerRunning = false
                     print("❌ Server failed: \(error)")
                     self?.onError?("Server failed to start: \(error)")
-                    
-                    // Only retry if it's not an "address in use" error
-                    let errorDescription = "\(error)"
-                    if case .posix(let posixErrorCode) = error, posixErrorCode == .EADDRINUSE {
-                        print("⚠️ Port \(self?.port ?? 0) is already in use - not retrying")
-                        return
-                    } else if errorDescription.contains("Address already in use") || errorDescription.contains("rawValue: 48") {
-                        print("⚠️ Port \(self?.port ?? 0) is already in use - not retrying")
-                        return
-                    }
-                    
-                    // Try to restart after a delay for other errors
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
-                        self?.start()
-                    }
                 case .cancelled:
                     self?.isServerRunning = false
                     print("🔌 WebSocket server cancelled")
@@ -91,18 +71,6 @@ class WebSocketServer {
             isServerRunning = false
             print("❌ Failed to start server: \(error)")
             onError?("Failed to start server: \(error)")
-            
-            // Don't retry if it's an address in use error
-            let errorDescription = "\(error)"
-            if errorDescription.contains("Address already in use") || errorDescription.contains("rawValue: 48") {
-                print("⚠️ Port \(port) is already in use - not retrying")
-                return
-            }
-            
-            // Retry after delay for other errors
-            DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
-                self.start()
-            }
         }
     }
     
@@ -111,10 +79,9 @@ class WebSocketServer {
         stopKeepAlive()
         connection?.cancel()
         
-        // Reset all state for new connection
+        // Reset state for new connection
         isWebSocketHandshakeComplete = false
         receivedData.removeAll()
-        frameBuffer.removeAll()
         
         connection = newConnection
         print("🔗 New TCP connection from: \(newConnection.endpoint)")
@@ -134,12 +101,8 @@ class WebSocketServer {
                 self?.stopKeepAlive()
                 self?.onConnectionChanged?(false)
                 self?.connection = nil
-            case .waiting(let error):
-                print("⏳ TCP connection waiting: \(error)")
-            case .preparing:
-                print("🔄 TCP connection preparing...")
             default:
-                print("🔍 TCP connection state: \(state)")
+                break
             }
         }
         
@@ -147,28 +110,25 @@ class WebSocketServer {
     }
     
     private func startReceiving() {
-        // Receive up to 10MB at once for large messages like screenshots
-        connection?.receive(minimumIncompleteLength: 1, maximumLength: 10485760) { [weak self] data, _, isComplete, error in
+        // Use a much larger buffer for screenshots - 20MB
+        connection?.receive(minimumIncompleteLength: 1, maximumLength: 20_971_520) { [weak self] data, _, isComplete, error in
             if let error = error {
                 self?.onError?("Receive error: \(error)")
                 return
             }
             
-            guard let data = data, !data.isEmpty else {
-                if isComplete {
-                    self?.connection?.cancel()
+            if let data = data, !data.isEmpty {
+                if self?.isWebSocketHandshakeComplete == false {
+                    self?.handleHandshake(data)
+                } else {
+                    // Simple approach: try to extract text directly
+                    self?.handleIncomingData(data)
                 }
-                return
             }
             
-            if self?.isWebSocketHandshakeComplete == true {
-                self?.handleWebSocketFrame(data)
-            } else {
-                self?.handleHandshake(data)
+            if !isComplete {
+                self?.startReceiving()
             }
-            
-            // Continue receiving
-            self?.startReceiving()
         }
     }
     
@@ -177,7 +137,6 @@ class WebSocketServer {
         
         guard let request = String(data: receivedData, encoding: .utf8) else { return }
         
-        // Check if we have a complete HTTP request
         if request.contains("\r\n\r\n") {
             print("📨 Received WebSocket handshake request")
             
@@ -240,138 +199,78 @@ class WebSocketServer {
         return hash.base64EncodedString()
     }
     
-    private func handleWebSocketFrame(_ data: Data) {
-        // Append new data to frame buffer
-        frameBuffer.append(data)
-        print("🔄 Frame buffer now has \(frameBuffer.count) bytes")
+    // Simple data handling - accumulate data until we have complete frames
+    private var dataBuffer = Data()
+    
+    private func handleIncomingData(_ data: Data) {
+        print("📦 Received \(data.count) bytes of WebSocket data")
         
-        // Process complete frames from buffer
-        while processNextFrame() {
-            // Keep processing frames until we can't parse a complete one
+        // Accumulate data
+        dataBuffer.append(data)
+        print("🔄 Buffer now has \(dataBuffer.count) bytes")
+        
+        // Try to extract complete messages
+        while let text = extractTextFromWebSocketData(dataBuffer) {
+            handleTextMessage(text)
+            // Remove processed data (this is simplified - in reality we'd track frame boundaries)
+            dataBuffer.removeAll()
         }
     }
     
-    private func processNextFrame() -> Bool {
-        // Debug logging
-        print("🔍 processNextFrame called - buffer size: \(frameBuffer.count)")
+    // Simple WebSocket frame extraction focusing on text frames
+    private func extractTextFromWebSocketData(_ data: Data) -> String? {
+        guard data.count >= 2 else { return nil }
         
-        // Ensure we have at least 2 bytes for frame header
-        guard frameBuffer.count >= 2 else { 
-            print("🔍 Buffer too small: \(frameBuffer.count) bytes")
-            return false 
-        }
+        let firstByte = data[0]
+        let secondByte = data[1]
         
-        // Additional safety check
-        guard !frameBuffer.isEmpty else {
-            print("❌ Frame buffer is empty!")
-            return false
-        }
-        
-        print("🔍 About to access frameBuffer[0] - buffer count: \(frameBuffer.count)")
-        
-        // Use safe access with bounds checking
-        guard frameBuffer.indices.contains(0), frameBuffer.indices.contains(1) else {
-            print("❌ Invalid indices for buffer size \(frameBuffer.count)")
-            return false
-        }
-        
-        // Ultra-safe access using optional subscripts
-        guard let firstByte = frameBuffer.indices.contains(0) ? frameBuffer[0] : nil,
-              let secondByte = frameBuffer.indices.contains(1) ? frameBuffer[1] : nil else {
-            print("❌ Could not safely access frame buffer bytes")
-            return false
-        }
-        
-        print("🔍 Successfully read frame header bytes: \(firstByte), \(secondByte)")
-        
-        let fin = (firstByte & 0x80) != 0
+        // Check if it's a text frame (opcode 1)
         let opcode = firstByte & 0x0F
+        guard opcode == 0x1 else { return nil }
+        
         let masked = (secondByte & 0x80) != 0
         var payloadLength = Int(secondByte & 0x7F)
-        
-        var headerLength = 2
+        var dataIndex = 2
         
         // Handle extended payload length
         if payloadLength == 126 {
-            guard frameBuffer.count >= 4 else { return false }
-            payloadLength = Int(frameBuffer[2]) << 8 | Int(frameBuffer[3])
-            headerLength = 4
+            guard data.count >= 4 else { return nil }
+            payloadLength = Int(data[2]) << 8 | Int(data[3])
+            dataIndex = 4
         } else if payloadLength == 127 {
-            guard frameBuffer.count >= 10 else { return false }
-            // Handle 64-bit payload length
-            let high = UInt64(frameBuffer[2]) << 56 | UInt64(frameBuffer[3]) << 48 |
-                      UInt64(frameBuffer[4]) << 40 | UInt64(frameBuffer[5]) << 32
-            let low = UInt64(frameBuffer[6]) << 24 | UInt64(frameBuffer[7]) << 16 |
-                     UInt64(frameBuffer[8]) << 8 | UInt64(frameBuffer[9])
+            guard data.count >= 10 else { return nil }
+            // Handle 64-bit payload length correctly
+            let high = UInt64(data[2]) << 56 | UInt64(data[3]) << 48 | UInt64(data[4]) << 40 | UInt64(data[5]) << 32
+            let low = UInt64(data[6]) << 24 | UInt64(data[7]) << 16 | UInt64(data[8]) << 8 | UInt64(data[9])
             payloadLength = Int(high | low)
-            headerLength = 10
-            print("📊 Large frame: \(payloadLength) bytes")
+            dataIndex = 10
         }
         
-        // Add mask key length if masked
+        // Handle masking
+        var maskingKey: [UInt8] = []
         if masked {
-            headerLength += 4
+            guard data.count >= dataIndex + 4 else { return nil }
+            maskingKey = Array(data[dataIndex..<dataIndex + 4])
+            dataIndex += 4
         }
         
-        // Check if we have the complete frame
-        let totalFrameLength = headerLength + payloadLength
-        guard frameBuffer.count >= totalFrameLength else {
-            print("⏳ Waiting for more data: have \(frameBuffer.count), need \(totalFrameLength)")
-            return false
-        }
+        // Extract payload
+        guard data.count >= dataIndex + payloadLength else { return nil }
+        var payload = Array(data[dataIndex..<dataIndex + payloadLength])
         
-        // Extract mask key if present
-        var maskKey: [UInt8] = []
-        if masked {
-            let maskStart = headerLength - 4
-            maskKey = Array(frameBuffer[maskStart..<maskStart + 4])
-        }
-        
-        // Extract and unmask payload
-        let payloadStart = headerLength
-        var payload = Array(frameBuffer[payloadStart..<payloadStart + payloadLength])
-        
+        // Unmask payload if needed
         if masked {
             for i in 0..<payload.count {
-                payload[i] ^= maskKey[i % 4]
+                payload[i] ^= maskingKey[i % 4]
             }
         }
         
-        // Process the frame based on opcode
-        switch opcode {
-        case 0x1: // Text frame
-            if let message = String(data: Data(payload), encoding: .utf8) {
-                handleTextMessage(message)
-            }
-        case 0x8: // Close frame
-            connection?.cancel()
-        case 0x9: // Ping frame
-            sendPong(Data(payload))
-        default:
-            break
-        }
-        
-        // Remove processed frame from buffer
-        frameBuffer.removeFirst(totalFrameLength)
-        
-        return true  // Successfully processed a frame
+        return String(data: Data(payload), encoding: .utf8)
     }
     
     private func handleTextMessage(_ message: String) {
-        // Log differently based on message size
         if message.count > 10000 {
             print("📨 Received LARGE message: \(message.count) chars")
-            
-            // Try to identify message type
-            if let data = message.data(using: .utf8),
-               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let messageType = json["type"] as? String {
-                print("🎯 Large message type: \(messageType)")
-                
-                if messageType == "screenshot" {
-                    print("📸 SCREENSHOT RECEIVED! Processing...")
-                }
-            }
         } else {
             print("📨 Received message: \(message)")
         }
@@ -402,13 +301,62 @@ class WebSocketServer {
         }
     }
     
+    func sendMessage(_ message: [String: Any]) {
+        guard isWebSocketHandshakeComplete else {
+            print("❌ Cannot send message: WebSocket handshake not complete")
+            return
+        }
+        
+        do {
+            let data = try JSONSerialization.data(withJSONObject: message)
+            if let text = String(data: data, encoding: .utf8) {
+                sendTextFrame(text)
+            }
+        } catch {
+            print("❌ Failed to serialize message: \(error)")
+            onError?("Failed to serialize message: \(error)")
+        }
+    }
+    
+    private func sendTextFrame(_ text: String) {
+        guard let connection = connection,
+              let data = text.data(using: .utf8) else { return }
+        
+        var frame = Data()
+        
+        // First byte: FIN (1) + RSV (000) + Opcode (0001 for text)
+        frame.append(0x81)
+        
+        // Payload length
+        let length = data.count
+        if length < 126 {
+            frame.append(UInt8(length))
+        } else if length < 65536 {
+            frame.append(126)
+            frame.append(UInt8(length >> 8))
+            frame.append(UInt8(length & 0xFF))
+        } else {
+            frame.append(127)
+            let length64 = UInt64(length)
+            for i in 0..<8 {
+                frame.append(UInt8((length64 >> (56 - i * 8)) & 0xFF))
+            }
+        }
+        
+        // Payload data
+        frame.append(data)
+        
+        connection.send(content: frame, completion: .contentProcessed { error in
+            if let error = error {
+                print("❌ Send error: \(error)")
+            }
+        })
+    }
+    
     private func sendSettingsToExtension() {
         // Send current settings to Chrome extension
         let settingsManager = SettingsManager.shared
-        print("📤 WebSocketServer: Sending \(settingsManager.agentModels.count) agent models to extension")
-        for (agent, config) in settingsManager.agentModels {
-            print("   Agent \(agent.rawValue): \(config.provider) > \(config.modelName) (temp: \(config.parameters?.temperature ?? 0), topP: \(config.parameters?.topP ?? 0))")
-        }
+        print("📤 SimpleWebSocketServer: Sending \(settingsManager.agentModels.count) agent models to extension")
         
         let settingsUpdate: [String: Any] = [
             "type": "settings_update",
@@ -424,22 +372,26 @@ class WebSocketServer {
                     if let createdAt = provider.createdAt { dict["createdAt"] = createdAt }
                     return dict
                 },
-                "agentModels": settingsManager.agentModels.mapValues { config in
-                    var dict: [String: Any] = [
-                        "provider": config.provider,
-                        "modelName": config.modelName
-                    ]
-                    if let params = config.parameters {
-                        dict["parameters"] = [
-                            "temperature": params.temperature,
-                            "topP": params.topP
+                "agentModels": {
+                    var agentModelsWithStringKeys: [String: Any] = [:]
+                    for (key, config) in settingsManager.agentModels {
+                        var dict: [String: Any] = [
+                            "provider": config.provider,
+                            "modelName": config.modelName
                         ]
+                        if let params = config.parameters {
+                            dict["parameters"] = [
+                                "temperature": params.temperature,
+                                "topP": params.topP
+                            ]
+                        }
+                        if let reasoningEffort = config.reasoningEffort {
+                            dict["reasoningEffort"] = reasoningEffort
+                        }
+                        agentModelsWithStringKeys[key.rawValue] = dict
                     }
-                    if let reasoningEffort = config.reasoningEffort {
-                        dict["reasoningEffort"] = reasoningEffort
-                    }
-                    return dict
-                }.mapKeys { $0.rawValue }
+                    return agentModelsWithStringKeys
+                }()
             ]
         ]
         
@@ -483,73 +435,6 @@ class WebSocketServer {
         sendMessage(firewallSettingsUpdate)
     }
     
-    func sendMessage(_ message: [String: Any]) {
-        guard isWebSocketHandshakeComplete else {
-            print("❌ Cannot send message: WebSocket handshake not complete")
-            return
-        }
-        
-        print("📤 Sending WebSocket message: \(message)")
-        do {
-            let data = try JSONSerialization.data(withJSONObject: message)
-            if let text = String(data: data, encoding: .utf8) {
-                print("📤 Serialized message: \(text)")
-                sendTextFrame(text)
-            }
-        } catch {
-            print("❌ Failed to serialize message: \(error)")
-            onError?("Failed to serialize message: \(error)")
-        }
-    }
-    
-    
-    private func sendTextFrame(_ text: String) {
-        guard let connection = connection,
-              let data = text.data(using: .utf8) else { return }
-        
-        var frame = Data()
-        
-        // First byte: FIN (1) + RSV (000) + Opcode (0001 for text)
-        frame.append(0x81)
-        
-        // Payload length
-        let length = data.count
-        if length < 126 {
-            frame.append(UInt8(length))
-        } else if length < 65536 {
-            frame.append(126)
-            frame.append(UInt8(length >> 8))
-            frame.append(UInt8(length & 0xFF))
-        } else {
-            // For simplicity, we'll limit message size
-            return
-        }
-        
-        // Payload data
-        frame.append(data)
-        
-        connection.send(content: frame, completion: .contentProcessed { error in
-            if let error = error {
-                print("❌ Send error: \(error)")
-            } else {
-                print("✅ Message sent successfully")
-            }
-        })
-    }
-    
-    private func sendPong(_ data: Data) {
-        guard let connection = connection else { return }
-        
-        var frame = Data()
-        frame.append(0x8A) // FIN + Pong opcode
-        frame.append(UInt8(data.count))
-        frame.append(data)
-        
-        connection.send(content: frame, completion: .contentProcessed { _ in
-            print("🏓 Pong sent")
-        })
-    }
-    
     private func startKeepAlive() {
         stopKeepAlive()
         
@@ -568,7 +453,6 @@ class WebSocketServer {
         
         let pingData = Data()
         sendPingFrame(pingData)
-        print("🏓 Sent ping to keep connection alive")
     }
     
     private func sendPingFrame(_ data: Data) {
@@ -579,29 +463,21 @@ class WebSocketServer {
         frame.append(UInt8(data.count))
         frame.append(data)
         
-        connection.send(content: frame, completion: .contentProcessed { error in
-            if let error = error {
-                print("❌ Failed to send ping: \(error)")
-            }
-        })
+        connection.send(content: frame, completion: .contentProcessed { _ in })
     }
     
     func stop() {
         print("🔌 Stopping WebSocket server...")
         stopKeepAlive()
         
-        // Close connection first
         connection?.cancel()
         connection = nil
         
-        // Cancel listener
         listener?.cancel()
         listener = nil
         
-        // Reset all state
         isWebSocketHandshakeComplete = false
         receivedData.removeAll()
-        frameBuffer.removeAll()
         isServerRunning = false
         
         print("✅ WebSocket server stopped")

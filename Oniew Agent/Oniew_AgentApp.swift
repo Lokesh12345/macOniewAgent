@@ -44,6 +44,9 @@ struct Oniew_AgentApp: App {
                     window.setFrameOrigin(NSPoint(x: xPosition, y: yPosition))
                 }
                 
+                // Configure stealth mode (hide from screen sharing by default)
+                WindowConfigurator.configureScreenSharingHiding(window)
+                
                 window.makeKeyAndOrderFront(nil)
             }
         }

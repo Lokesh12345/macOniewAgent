@@ -1,0 +1,37 @@
+{
+  "manifest_version": 3,
+  "name": "Visual Agent",
+  "version": "1.0",
+  "description": "Simple visual AI agent for browser automation",
+  
+  "permissions": [
+    "activeTab",
+    "tabs",
+    "storage",
+    "scripting",
+    "downloads"
+  ],
+  
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  
+  "background": {
+    "service_worker": "src/background.js"
+  },
+  
+  "content_scripts": [{
+    "matches": ["<all_urls>"],
+    "js": ["src/content.js"],
+    "run_at": "document_idle"
+  }],
+  
+  "web_accessible_resources": [{
+    "resources": ["dom-analyzer.js"],
+    "matches": ["<all_urls>"]
+  }],
+  
+  "action": {
+    "default_popup": "src/popup.html"
+  }
+}

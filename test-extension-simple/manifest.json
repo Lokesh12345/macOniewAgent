@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "Test Extension Connection",
+  "version": "1.0",
+  "description": "Simple test to verify extension can connect to WebSocket",
+  
+  "permissions": [
+    "activeTab",
+    "tabs",
+    "storage"
+  ],
+  
+  "background": {
+    "service_worker": "background.js"
+  }
+}

@@ -7,16 +7,17 @@ struct AgentPanel: View {
     @State private var selectedQuestion: Question? = nil
     @State private var isAnalyzing = false
     @State private var showingSettings = false
-    @State private var settingsLoading = false
+    @State private var showingTesting = false
     @State private var questions: [Question] = []
-    @State private var agentLogs: [AgentLog] = []
     @State private var chatText: String = ""
     @FocusState private var isChatFocused: Bool
     @State private var taskTimer: Timer? = nil
     @State private var elapsedTime: TimeInterval = 0
     
-    // Connection status
+    // Connection status and VL agent
     @StateObject private var connectionManager = ExtensionConnectionManager.shared
+    @StateObject private var visualAgent = VisualAgentManager()
+    @StateObject private var settingsManager = VLSettingsManager()
     
     
     var body: some View {
@@ -38,28 +39,20 @@ struct AgentPanel: View {
                     )
                 
                 if showingSettings {
-                    if settingsLoading {
-                        VStack(spacing: 16) {
-                            ProgressView()
-                                .scaleEffect(1.2)
-                            
-                            Text("Loading Settings...")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(.secondary)
-                        }
+                    VLSettingsPanel()
+                        .environmentObject(settingsManager)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    } else {
-                        SettingsPanel()
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    }
+                } else if showingTesting {
+                    TestingPanel()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     questionsContent
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
             
-            // Chat footer (only show for Agent panel, not Settings)
-            if !showingSettings {
+            // Chat footer (only show for Agent panel, not Settings/Testing)
+            if !showingSettings && !showingTesting {
                 chatFooter
             }
         }
@@ -76,27 +69,28 @@ struct AgentPanel: View {
     private var questionsHeader: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 4) {
-                HStack(spacing: 2) {
+                HStack(spacing: 1) {
                     Button(action: {
                         showingSettings = false
+                        showingTesting = false
                     }) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "questionmark.bubble.fill")
-                                .font(.system(size: 11))
+                        HStack(spacing: 2) {
+                            Image(systemName: "eye.fill")
+                                .font(.system(size: 9))
                             
                             Text("Agent")
-                                .font(.system(size: 11, weight: .semibold))
+                                .font(.system(size: 9, weight: .medium))
                         }
-                        .foregroundColor(showingSettings ? .primary.opacity(0.5) : .primary.opacity(0.8))
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .frame(minWidth: 50, minHeight: 28)
+                        .foregroundColor((showingSettings || showingTesting) ? .primary.opacity(0.5) : .primary.opacity(0.8))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 4)
+                        .frame(minHeight: 22)
                         .background(
-                            RoundedRectangle(cornerRadius: 6)
-                                .fill(showingSettings ? Color.clear : Color.blue.opacity(0.15))
+                            RoundedRectangle(cornerRadius: 4)
+                                .fill((showingSettings || showingTesting) ? Color.clear : Color.blue.opacity(0.15))
                                 .overlay(
-                                    RoundedRectangle(cornerRadius: 6)
-                                        .stroke(showingSettings ? Color.clear : Color.blue.opacity(0.3), lineWidth: 1)
+                                    RoundedRectangle(cornerRadius: 4)
+                                        .stroke((showingSettings || showingTesting) ? Color.clear : Color.blue.opacity(0.3), lineWidth: 0.5)
                                 )
                         )
                     }
@@ -104,35 +98,53 @@ struct AgentPanel: View {
                     .contentShape(Rectangle())
                     
                     Button(action: {
-                        if !showingSettings {
-                            settingsLoading = true
-                            showingSettings = true
-                            
-                            // Show loading for a brief moment, then show settings
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                                withAnimation(.easeInOut(duration: 0.2)) {
-                                    settingsLoading = false
-                                }
-                            }
-                        }
+                        showingSettings = true
+                        showingTesting = false
                     }) {
-                        HStack(spacing: 4) {
+                        HStack(spacing: 2) {
                             Image(systemName: "gearshape")
-                                .font(.system(size: 11))
+                                .font(.system(size: 9))
                             
                             Text("Settings")
-                                .font(.system(size: 11, weight: .semibold))
+                                .font(.system(size: 9, weight: .medium))
                         }
                         .foregroundColor(showingSettings ? .primary.opacity(0.8) : .primary.opacity(0.5))
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .frame(minWidth: 50, minHeight: 28)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 4)
+                        .frame(minHeight: 22)
                         .background(
-                            RoundedRectangle(cornerRadius: 6)
+                            RoundedRectangle(cornerRadius: 4)
                                 .fill(showingSettings ? Color.blue.opacity(0.15) : Color.clear)
                                 .overlay(
-                                    RoundedRectangle(cornerRadius: 6)
-                                        .stroke(showingSettings ? Color.blue.opacity(0.3) : Color.clear, lineWidth: 1)
+                                    RoundedRectangle(cornerRadius: 4)
+                                        .stroke(showingSettings ? Color.blue.opacity(0.3) : Color.clear, lineWidth: 0.5)
+                                )
+                        )
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    .contentShape(Rectangle())
+                    
+                    Button(action: {
+                        showingTesting = true
+                        showingSettings = false
+                    }) {
+                        HStack(spacing: 2) {
+                            Image(systemName: "testtube.2")
+                                .font(.system(size: 9))
+                            
+                            Text("Testing")
+                                .font(.system(size: 9, weight: .medium))
+                        }
+                        .foregroundColor(showingTesting ? .primary.opacity(0.8) : .primary.opacity(0.5))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 4)
+                        .frame(minHeight: 22)
+                        .background(
+                            RoundedRectangle(cornerRadius: 4)
+                                .fill(showingTesting ? Color.blue.opacity(0.15) : Color.clear)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 4)
+                                        .stroke(showingTesting ? Color.blue.opacity(0.3) : Color.clear, lineWidth: 0.5)
                                 )
                         )
                     }
@@ -147,32 +159,59 @@ struct AgentPanel: View {
                         .scaleEffect(0.6)
                 }
                 
-                // Enhanced Connection status indicator
-                HStack(spacing: 4) {
-                    let isConnected = connectionManager.hasActiveConnection()
-                    let isServerRunning = connectionManager.isServerRunning()
-                    let detailedStatus = connectionManager.getDetailedStatus()
+                // Connection and Memory status
+                HStack(spacing: 2) {
+                    // Connection status
+                    HStack(spacing: 4) {
+                        let isConnected = connectionManager.hasActiveConnection()
+                        let isServerRunning = connectionManager.isServerRunning()
+                        
+                        Circle()
+                            .fill(isConnected ? Color.green : (isServerRunning ? Color.yellow : Color.red))
+                            .frame(width: 6, height: 6)
+                        
+                        Text(isConnected ? "Connected" : (isServerRunning ? "Waiting..." : "Disconnected"))
+                            .font(.system(size: 8, weight: .medium))
+                            .foregroundColor(isConnected ? .green : (isServerRunning ? .yellow : .red))
+                    }
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(
+                        RoundedRectangle(cornerRadius: 4)
+                            .fill((connectionManager.hasActiveConnection() ? Color.green : (connectionManager.isServerRunning() ? Color.yellow : Color.red)).opacity(0.1))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 4)
+                                    .stroke((connectionManager.hasActiveConnection() ? Color.green : (connectionManager.isServerRunning() ? Color.yellow : Color.red)).opacity(0.3), lineWidth: 0.5)
+                            )
+                    )
+                    .help(connectionManager.getDetailedStatus())
                     
-                    // More accurate status indicator  
-                    Circle()
-                        .fill(isConnected ? Color.green : (isServerRunning ? Color.yellow : Color.red))
-                        .frame(width: 6, height: 6)
+                    // Memory status
+                    let memoryManager = visualAgent.getMemoryManager()
+                    let hasActiveSession = memoryManager.currentSession != nil
+                    let sessionCount = memoryManager.recentSessions.count
                     
-                    Text(isConnected ? "Connected" : (isServerRunning ? "Waiting..." : "Disconnected"))
-                        .font(.system(size: 8, weight: .medium))
-                        .foregroundColor(isConnected ? .green : (isServerRunning ? .yellow : .red))
+                    HStack(spacing: 3) {
+                        Image(systemName: "brain.head.profile")
+                            .font(.system(size: 6))
+                            .foregroundColor(hasActiveSession ? .blue : .secondary)
+                        
+                        Text(hasActiveSession ? "Memory On" : "\(sessionCount)")
+                            .font(.system(size: 7, weight: .medium))
+                            .foregroundColor(hasActiveSession ? .blue : .secondary)
+                    }
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 2)
+                    .background(
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill((hasActiveSession ? Color.blue : Color.secondary).opacity(0.1))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 3)
+                                    .stroke((hasActiveSession ? Color.blue : Color.secondary).opacity(0.3), lineWidth: 0.5)
+                            )
+                    )
+                    .help(hasActiveSession ? "Active memory session in progress" : "\(sessionCount) previous sessions in memory")
                 }
-                .padding(.horizontal, 6)
-                .padding(.vertical, 3)
-                .background(
-                    RoundedRectangle(cornerRadius: 4)
-                        .fill((connectionManager.hasActiveConnection() ? Color.green : (connectionManager.isServerRunning() ? Color.yellow : Color.red)).opacity(0.1))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 4)
-                                .stroke((connectionManager.hasActiveConnection() ? Color.green : (connectionManager.isServerRunning() ? Color.yellow : Color.red)).opacity(0.3), lineWidth: 0.5)
-                        )
-                )
-                .help(connectionManager.getDetailedStatus()) // Show detailed status on hover
                 
                 // Exit button
                 Button(action: {
@@ -224,13 +263,27 @@ struct AgentPanel: View {
                         .fill(Color.blue)
                         .frame(width: 4, height: 4)
                     
-                    Text("Settings Configuration")
+                    Text("Model Configuration")
                         .font(.system(size: 8))
                         .foregroundColor(.secondary)
                     
                     Spacer()
                     
-                    Text("Ready")
+                    Text("\(settingsManager.selectedModel.displayName)")
+                        .font(.system(size: 8))
+                        .foregroundColor(.secondary)
+                } else if showingTesting {
+                    Circle()
+                        .fill(Color.orange)
+                        .frame(width: 4, height: 4)
+                    
+                    Text("DOM Visualization Testing")
+                        .font(.system(size: 8))
+                        .foregroundColor(.secondary)
+                    
+                    Spacer()
+                    
+                    Text("Extension Testing")
                         .font(.system(size: 8))
                         .foregroundColor(.secondary)
                 } else {
@@ -241,6 +294,12 @@ struct AgentPanel: View {
                     Text("\(questions.count) tasks")
                         .font(.system(size: 8))
                         .foregroundColor(.secondary)
+                    
+                    Spacer()
+                    
+                    Text("Visual AI • Screenshot Analysis")
+                        .font(.system(size: 8))
+                        .foregroundColor(.secondary)
                 }
             }
         }
@@ -248,6 +307,24 @@ struct AgentPanel: View {
     
     private var questionsContent: some View {
         VStack(spacing: 0) {
+            // Screenshot view (show when processing or has screenshot)
+            if visualAgent.currentScreenshot != nil || visualAgent.isProcessing {
+                ScreenshotView(
+                    screenshot: visualAgent.currentScreenshot,
+                    websiteInfo: visualAgent.currentWebsiteInfo,
+                    isProcessing: visualAgent.isProcessing
+                )
+                .padding(.horizontal, 4)
+                .padding(.bottom, 8)
+                
+                // Divider
+                Rectangle()
+                    .fill(Color.primary.opacity(0.1))
+                    .frame(height: 0.5)
+                    .padding(.horizontal, 8)
+                    .padding(.bottom, 8)
+            }
+            
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
                     if questions.isEmpty {
@@ -286,62 +363,7 @@ struct AgentPanel: View {
         }
     }
     
-    // This is no longer used since we moved to SettingsPanel component
-    // Keeping for backward compatibility but can be removed
-    
-    private var agentLogsSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                Image(systemName: "globe")
-                    .font(.system(size: 10))
-                    .foregroundColor(.blue)
-                
-                Text("Agent Server Logs")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundColor(.primary)
-                
-                Spacer()
-                
-                Text("\(agentLogs.count) logs")
-                    .font(.system(size: 8))
-                    .foregroundColor(.secondary)
-            }
-            
-            VStack(alignment: .leading, spacing: 4) {
-                ForEach(agentLogs.reversed()) { log in
-                    AgentLogRow(log: log)
-                }
-            }
-        }
-        .padding(8)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color.blue.opacity(0.05))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(Color.blue.opacity(0.3), lineWidth: 0.5)
-                )
-        )
-    }
-    
-    private var agentEmptyState: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "cpu")
-                .font(.system(size: 24))
-                .foregroundColor(.primary.opacity(0.4))
-            
-            Text("No Agent Activity")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundColor(.primary.opacity(0.6))
-            
-            Text("Agent logs will appear here")
-                .font(.system(size: 10))
-                .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.top, 40)
-    }
+    // Agent logs section removed for visual agent simplification
     
     private var questionsEmptyState: some View {
         VStack(spacing: 16) {
@@ -479,70 +501,46 @@ struct AgentPanel: View {
     }
     
     private func setupExecutorEventListener() {
-        // Listen for executor events from the extension
+        // Listen for visual agent events
+        NotificationCenter.default.addObserver(
+            forName: Notification.Name("ScreenshotReceived"),
+            object: nil,
+            queue: .main
+        ) { notification in
+            if let data = notification.userInfo as? [String: Any] {
+                self.visualAgent.handleScreenshot(data)
+            }
+        }
+        
+        // Listen for action results
+        NotificationCenter.default.addObserver(
+            forName: Notification.Name("ActionResultReceived"),
+            object: nil,
+            queue: .main
+        ) { notification in
+            if let data = notification.userInfo as? [String: Any] {
+                self.handleActionResult(data)
+            }
+        }
+        
+        // Keep some executor events for backward compatibility
         NotificationCenter.default.addObserver(
             forName: Notification.Name("ExecutorStateChanged"),
             object: nil,
             queue: .main
         ) { notification in
             if let event = notification.userInfo as? [String: Any] {
-                handleExecutorEvent(event)
+                self.handleExecutorEvent(event)
             }
         }
+    }
+    
+    private func handleActionResult(_ data: [String: Any]) {
+        guard let lastIndex = questions.indices.last else { return }
         
-        // Listen for task analysis updates
-        NotificationCenter.default.addObserver(
-            forName: Notification.Name("TaskAnalysisUpdate"),
-            object: nil,
-            queue: .main
-        ) { notification in
-            if let userInfo = notification.userInfo {
-                handleTaskAnalysisUpdate(userInfo)
-            }
-        }
-        
-        // Listen for LLM thinking updates
-        NotificationCenter.default.addObserver(
-            forName: Notification.Name("LLMThinkingUpdate"),
-            object: nil,
-            queue: .main
-        ) { notification in
-            if let userInfo = notification.userInfo {
-                handleLLMThinkingUpdate(userInfo)
-            }
-        }
-        
-        // Listen for step progress updates
-        NotificationCenter.default.addObserver(
-            forName: Notification.Name("StepProgressUpdate"),
-            object: nil,
-            queue: .main
-        ) { notification in
-            if let userInfo = notification.userInfo {
-                handleStepProgressUpdate(userInfo)
-            }
-        }
-        
-        // Listen for task completion updates
-        NotificationCenter.default.addObserver(
-            forName: Notification.Name("TaskCompletionUpdate"),
-            object: nil,
-            queue: .main
-        ) { notification in
-            if let userInfo = notification.userInfo {
-                handleTaskCompletionUpdate(userInfo)
-            }
-        }
-        
-        // Listen for user input requests
-        NotificationCenter.default.addObserver(
-            forName: Notification.Name("UserInputNeeded"),
-            object: nil,
-            queue: .main
-        ) { notification in
-            if let userInfo = notification.userInfo {
-                handleUserInputRequest(userInfo)
-            }
+        if let success = data["success"] as? Bool {
+            let message = success ? "✅ Action completed successfully" : "❌ Action failed"
+            addExecutionLog(message, to: lastIndex)
         }
     }
     
@@ -972,27 +970,27 @@ struct AgentPanel: View {
         return String(format: "%02d:%02d min", minutes, seconds)
     }
     
-    // MARK: - Simplified Task Analysis Steps
+    // MARK: - Visual Agent Analysis Steps
     private func addTaskAnalysisSteps(to questionIndex: Int) {
-        let analysisSteps = [
-            ("Starting", "Task received, analyzing requirements..."),
-            ("Tab_Analysis", "Finding active browser tab..."),
-            ("Tab_Ready", "Browser tab prepared for execution..."),
-            ("Setup", "Setting up AI agents and browser context...")
+        let visualSteps = [
+            ("Screenshot", "Taking browser screenshot..."),
+            ("Analysis", "Analyzing image with AI vision..."),
+            ("Planning", "Planning browser actions..."),
+            ("Ready", "Ready to execute actions...")
         ]
         
-        for (index, (phase, message)) in analysisSteps.enumerated() {
-            let delay = Double(index) * 2.0 // 2-second gaps
+        for (index, (phase, message)) in visualSteps.enumerated() {
+            let delay = Double(index) * 1.5 // 1.5-second gaps
             
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-                let stepId = "analysis_\(phase)_\(index)"
+                let stepId = "visual_\(phase)_\(index)"
                 guard !questions[questionIndex].stepIds.contains(stepId) else { return }
                 
                 let step = ExecutionStep(
                     stepNumber: index,
                     timestamp: Date(),
                     type: .analysis,
-                    title: "📊 Task Analysis - \(phase)",
+                    title: "👁️ Visual Analysis - \(phase)",
                     details: message,
                     status: .running
                 )
@@ -1004,13 +1002,28 @@ struct AgentPanel: View {
                     questions[questionIndex].executionSteps.append(step)
                 }
                 
-                // Auto-complete after 1.5 seconds
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                // Auto-complete after 1.2 seconds
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
                     if questions[questionIndex].activeStepId == step.id.uuidString {
                         questions[questionIndex].activeStepId = nil
                     }
                 }
             }
+        }
+    }
+    
+    private func addExecutionLog(_ message: String, to questionIndex: Int) {
+        let step = ExecutionStep(
+            stepNumber: questions[questionIndex].executionSteps.count,
+            timestamp: Date(),
+            type: .progress,
+            title: "⚡ Action Update",
+            details: message,
+            status: .completed
+        )
+        
+        withAnimation(.easeInOut(duration: 0.3)) {
+            questions[questionIndex].executionSteps.append(step)
         }
     }
     
@@ -1051,42 +1064,31 @@ struct AgentPanel: View {
     private func sendMessage() {
         guard !chatText.isEmpty else { return }
         
-        print("Sending message: \(chatText)")
+        print("Sending visual task: \(chatText)")
         
-        // Add to questions 
-        if !showingSettings {
-            let newQuestion = Question(
-                text: chatText,
-                category: "User Input",
-                confidence: 1.0,
-                answer: "Processing your request...",
-                needsRetry: false
-            )
-            questions.append(newQuestion)
+        // Add to questions
+        let newQuestion = Question(
+            text: chatText,
+            category: "Visual AI",
+            confidence: 1.0,
+            answer: "Analyzing screenshot...",
+            needsRetry: false
+        )
+        questions.append(newQuestion)
+        
+        // Send task to visual agent if connected
+        if connectionManager.isConnected {
+            // Set loading state and start timer immediately
+            let questionIndex = questions.count - 1
+            questions[questionIndex].isLoadingSteps = true
+            questions[questionIndex].isExecuting = true
+            questions[questionIndex].taskStartTime = Date()
             
-            // Send task to extension if connected and notify monitor
-            if connectionManager.isConnected {
-                // Set loading state and start timer immediately
-                let questionIndex = questions.count - 1
-                questions[questionIndex].isLoadingSteps = true
-                questions[questionIndex].isExecuting = true
-                questions[questionIndex].taskStartTime = Date()
-                
-                // Start timer
-                startTaskTimer()
-                
-                connectionManager.executeTask(chatText)
-                
-                // Notify TaskMonitorPanel about the new task
-                NotificationCenter.default.post(
-                    name: Notification.Name("TaskStarted"),
-                    object: nil,
-                    userInfo: [
-                        "task": chatText,
-                        "taskId": UUID().uuidString
-                    ]
-                )
-            }
+            // Start timer
+            startTaskTimer()
+            
+            // Execute using visual agent
+            visualAgent.executeTask(chatText, using: connectionManager)
         }
         
         // Clear input

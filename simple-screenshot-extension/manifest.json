@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "Simple Screenshot",
+  "version": "1.0",
+  "description": "Take screenshot and save to disk",
+  
+  "permissions": [
+    "activeTab",
+    "tabs",
+    "downloads"
+  ],
+  
+  "host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
+  
+  "background": {
+    "service_worker": "background.js"
+  },
+  
+  "action": {
+    "default_title": "Take Screenshot"
+  }
+}
