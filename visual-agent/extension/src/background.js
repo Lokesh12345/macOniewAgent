@@ -121,6 +121,10 @@ async function handleMessage(message) {
       console.log('👁️ Extension: Processing DOM visualization request');
       await startDOMVisualization(message.data);
       break;
+    case 'execute_browser_action':
+      console.log('⚡ Extension: Processing browser action request');
+      await executeBrowserAction(message.data);
+      break;
   }
 }
 
@@ -248,17 +252,9 @@ async function startDOMVisualization(data) {
       throw new Error('Cannot visualize DOM on chrome:// or extension pages');
     }
     
-    console.log('👁️ Injecting DOM analyzer into tab:', tab.id);
+    console.log('👁️ Starting DOM visualization via content script...');
     
-    // First inject the DOM analyzer script
-    await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      files: ['/dom-analyzer.js']
-    });
-    
-    console.log('👁️ DOM analyzer injected, starting visualization...');
-    
-    // Then execute the visualization
+    // Execute visualization directly (content script has DOM analyzer)
     const result = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       func: () => {
@@ -267,7 +263,7 @@ async function startDOMVisualization(data) {
           console.log('👁️ DOM visualization results:', results);
           return results;
         } else {
-          throw new Error('DOM analyzer not available');
+          throw new Error('DOM analyzer not available - content script may not be loaded');
         }
       }
     });
@@ -302,6 +298,460 @@ async function startDOMVisualization(data) {
         timestamp: Date.now()
       }
     });
+  }
+}
+
+// Execute browser action using element index
+async function executeBrowserAction(data) {
+  console.log('⚡ Starting browser action execution...', data);
+  
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    
+    if (!tab.id) {
+      throw new Error('No active tab found');
+    }
+    
+    const { action, index, text, url, seconds, keys, yPercent } = data;
+    
+    console.log(`⚡ Executing action: ${action} with index: ${index}`);
+    
+    // Execute the action directly via content script (no injection needed)
+    const result = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: performBrowserAction,
+      args: [action, { index, text, url, seconds, keys, yPercent }]
+    });
+    
+    const actionResult = result[0]?.result;
+    console.log('⚡ Browser action completed:', actionResult);
+    
+    // Check if reanalysis is needed (from Chrome extension pattern)
+    if (actionResult?.reanalysisNeeded) {
+      console.log('🔄 DOM reanalysis needed, sending reanalysis signal');
+      sendMessage({
+        type: 'browser_action_reanalysis_needed',
+        data: {
+          success: false,
+          action: action,
+          error: actionResult.error,
+          reanalysisNeeded: true,
+          timestamp: Date.now(),
+          tabInfo: {
+            url: tab.url,
+            title: tab.title,
+            tabId: tab.id
+          }
+        }
+      });
+      return;
+    }
+    
+    // Send success result back to Mac app
+    sendMessage({
+      type: 'browser_action_complete',
+      data: {
+        success: actionResult?.success !== false,
+        action: action,
+        result: actionResult,
+        timestamp: Date.now(),
+        tabInfo: {
+          url: tab.url,
+          title: tab.title,
+          tabId: tab.id
+        }
+      }
+    });
+    
+  } catch (error) {
+    console.error('❌ Browser action failed:', error);
+    
+    // Send failure result back to Mac app
+    sendMessage({
+      type: 'browser_action_error',
+      data: {
+        success: false,
+        action: data.action,
+        error: error.message,
+        timestamp: Date.now()
+      }
+    });
+  }
+}
+
+// This function will be injected into the page context to perform browser actions
+function performBrowserAction(action, params) {
+  console.log(`⚡ Performing browser action: ${action}`, params);
+  
+  // Check if this is an indexed action (requires reanalysis)
+  const indexedActions = ['clickElement', 'inputText', 'getDropdownOptions', 'selectDropdownOption'];
+  const isIndexedAction = indexedActions.includes(action) && params.index !== undefined;
+  
+  // DOM reanalysis logic (copied from Chrome extension)
+  if (isIndexedAction) {
+    console.log('🔄 Indexed action detected, checking DOM state...');
+    
+    // Only check if DOM analyzer is available and has been run
+    if (window.domAnalyzer && window.domAnalyzer.cachedPathHashes) {
+      // Check for autocomplete first
+      if (window.domAnalyzer.hasAutocompleteAppeared()) {
+        console.log('🎯 SEQUENCE BREAK: Autocomplete detected, stopping action');
+        return {
+          success: false,
+          error: 'Autocomplete appeared, DOM changed - re-analyze needed',
+          reanalysisNeeded: true,
+          action: action
+        };
+      }
+      
+      // Check for DOM obstruction
+      if (window.domAnalyzer.hasObstructionOccurred()) {
+        console.log('🚧 OBSTRUCTION: DETECTED - DOM changed, need reanalysis');
+        return {
+          success: false,
+          error: 'DOM changed, re-analyze needed',
+          reanalysisNeeded: true,
+          action: action
+        };
+      }
+      
+      console.log('🚧 OBSTRUCTION: NONE - Continuing with action');
+    } else {
+      console.log('🔄 DOM analyzer not available or not initialized, skipping checks');
+    }
+  }
+  
+  // All action implementations must be embedded here since this runs in page context
+  
+  // Click element by index
+  function clickElementByIndex(index) {
+    console.log(`🎯 Attempting to click element with index: ${index}`);
+    
+    if (!window.domAnalyzer) {
+      throw new Error('DOM analyzer not available. Run visualization first.');
+    }
+    
+    const element = window.domAnalyzer.getElementByIndex(index);
+    console.log(`🔍 Found element for index ${index}:`, element);
+    
+    if (!element) {
+      throw new Error(`No element found with index ${index}. Available indices: ${Object.keys(window.domAnalyzer.getCachedElementMap()).join(', ')}`);
+    }
+    
+    if (!document.contains(element)) {
+      throw new Error(`Element at index ${index} is no longer in the DOM`);
+    }
+    
+    const rect = element.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+    
+    console.log(`📍 Clicking element at position (${centerX}, ${centerY})`);
+    
+    if (element.focus && typeof element.focus === 'function') {
+      element.focus();
+    }
+    
+    element.click();
+    
+    ['mousedown', 'mouseup', 'click'].forEach(eventType => {
+      const event = new MouseEvent(eventType, {
+        view: window,
+        bubbles: true,
+        cancelable: true,
+        clientX: centerX,
+        clientY: centerY,
+        button: 0
+      });
+      element.dispatchEvent(event);
+    });
+    
+    console.log(`✅ Successfully clicked element: ${element.tagName}`);
+    
+    return {
+      success: true,
+      message: `Clicked element at index ${index} (${element.tagName})`,
+      element: {
+        tagName: element.tagName,
+        className: element.className || '',
+        id: element.id || '',
+        text: element.textContent?.substring(0, 50) || ''
+      }
+    };
+  }
+
+  // Input text to element
+  function inputTextToElement(index, text) {
+    console.log(`⌨️ Attempting to input text "${text}" into element with index: ${index}`);
+    
+    if (!text) {
+      throw new Error('No text provided for input');
+    }
+    
+    if (!window.domAnalyzer) {
+      throw new Error('DOM analyzer not available. Run visualization first.');
+    }
+    
+    const element = window.domAnalyzer.getElementByIndex(index);
+    console.log(`🔍 Found element for index ${index}:`, element);
+    
+    if (!element) {
+      throw new Error(`No element found with index ${index}. Available indices: ${Object.keys(window.domAnalyzer.getCachedElementMap()).join(', ')}`);
+    }
+    
+    if (!document.contains(element)) {
+      throw new Error(`Element at index ${index} is no longer in the DOM`);
+    }
+    
+    const isValidInput = element instanceof HTMLInputElement || 
+                        element instanceof HTMLTextAreaElement ||
+                        element.isContentEditable ||
+                        element.getAttribute('contenteditable') === 'true';
+    
+    if (!isValidInput) {
+      throw new Error(`Element at index ${index} (${element.tagName}) is not a valid input field`);
+    }
+    
+    console.log(`📝 Inputting text into ${element.tagName} element`);
+    
+    element.focus();
+    
+    if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+      element.select();
+      element.value = text;
+      element.dispatchEvent(new Event('focus', { bubbles: true }));
+      element.dispatchEvent(new Event('input', { bubbles: true }));
+      element.dispatchEvent(new Event('change', { bubbles: true }));
+      element.dispatchEvent(new Event('blur', { bubbles: true }));
+    } else if (element.isContentEditable || element.getAttribute('contenteditable') === 'true') {
+      element.innerHTML = text;
+      element.dispatchEvent(new Event('focus', { bubbles: true }));
+      element.dispatchEvent(new Event('input', { bubbles: true }));
+      element.dispatchEvent(new Event('blur', { bubbles: true }));
+    }
+    
+    console.log(`✅ Successfully input text: "${text}"`);
+    
+    return {
+      success: true,
+      message: `Input "${text}" into element at index ${index} (${element.tagName})`,
+      element: {
+        tagName: element.tagName,
+        type: element.type || 'contenteditable',
+        id: element.id || '',
+        className: element.className || ''
+      }
+    };
+  }
+
+  // Scroll functions
+  function scrollToPercent(yPercent) {
+    const percent = Math.max(0, Math.min(100, yPercent));
+    const scrollHeight = document.documentElement.scrollHeight;
+    const viewportHeight = window.innerHeight;
+    const maxScroll = scrollHeight - viewportHeight;
+    const targetScroll = (maxScroll * percent) / 100;
+    
+    window.scrollTo({ top: targetScroll, behavior: 'smooth' });
+    
+    return {
+      success: true,
+      message: `Scrolled to ${percent}%`
+    };
+  }
+
+  function scrollToTop() {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    return {
+      success: true,
+      message: 'Scrolled to top'
+    };
+  }
+
+  function scrollToBottom() {
+    window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+    return {
+      success: true,
+      message: 'Scrolled to bottom'
+    };
+  }
+
+  function scrollToText(searchText) {
+    if (!searchText) {
+      throw new Error('No search text provided');
+    }
+    
+    const walker = document.createTreeWalker(
+      document.body,
+      NodeFilter.SHOW_TEXT,
+      null,
+      false
+    );
+    
+    let node;
+    while (node = walker.nextNode()) {
+      if (node.textContent && node.textContent.toLowerCase().includes(searchText.toLowerCase())) {
+        const element = node.parentElement;
+        if (element) {
+          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          return {
+            success: true,
+            message: `Scrolled to text: "${searchText}"`
+          };
+        }
+      }
+    }
+    
+    return {
+      success: false,
+      message: `Text "${searchText}" not found`
+    };
+  }
+
+  function sendKeys(keys) {
+    if (!keys) {
+      throw new Error('No keys provided');
+    }
+    
+    const activeElement = document.activeElement || document.body;
+    
+    const keyEvent = new KeyboardEvent('keydown', {
+      key: keys,
+      bubbles: true,
+      cancelable: true
+    });
+    
+    activeElement.dispatchEvent(keyEvent);
+    
+    return {
+      success: true,
+      message: `Sent keys: ${keys}`
+    };
+  }
+
+  function goBack() {
+    window.history.back();
+    return {
+      success: true,
+      message: 'Navigated back'
+    };
+  }
+
+  function waitAction(seconds) {
+    return {
+      success: true,
+      message: `Wait ${seconds || 3} seconds`
+    };
+  }
+
+  function getDropdownOptions(index) {
+    console.log(`📋 Getting dropdown options for element with index: ${index}`);
+    
+    if (!window.domAnalyzer) {
+      throw new Error('DOM analyzer not available. Run visualization first.');
+    }
+    
+    const element = window.domAnalyzer.getElementByIndex(index);
+    console.log(`🔍 Found element for index ${index}:`, element);
+    
+    if (!element) {
+      throw new Error(`No element found with index ${index}. Available indices: ${Object.keys(window.domAnalyzer.getCachedElementMap()).join(', ')}`);
+    }
+    
+    if (element.tagName.toLowerCase() !== 'select') {
+      throw new Error(`Element at index ${index} is a ${element.tagName}, not a dropdown/select`);
+    }
+    
+    const selectElement = element;
+    const options = Array.from(selectElement.options).map((option, idx) => ({
+      index: idx,
+      text: option.text,
+      value: option.value
+    }));
+    
+    console.log(`✅ Found ${options.length} dropdown options`);
+    
+    return {
+      success: true,
+      message: `Found ${options.length} dropdown options`,
+      options: options
+    };
+  }
+
+  function selectDropdownOption(index, optionText) {
+    console.log(`🎯 Selecting option "${optionText}" from dropdown at index: ${index}`);
+    
+    if (!window.domAnalyzer) {
+      throw new Error('DOM analyzer not available. Run visualization first.');
+    }
+    
+    const element = window.domAnalyzer.getElementByIndex(index);
+    console.log(`🔍 Found element for index ${index}:`, element);
+    
+    if (!element) {
+      throw new Error(`No element found with index ${index}. Available indices: ${Object.keys(window.domAnalyzer.getCachedElementMap()).join(', ')}`);
+    }
+    
+    if (element.tagName.toLowerCase() !== 'select') {
+      throw new Error(`Element at index ${index} is a ${element.tagName}, not a dropdown/select`);
+    }
+    
+    const selectElement = element;
+    const option = Array.from(selectElement.options).find(opt => opt.text === optionText);
+    
+    if (!option) {
+      const availableOptions = Array.from(selectElement.options).map(opt => opt.text).join(', ');
+      throw new Error(`Option "${optionText}" not found in dropdown. Available options: ${availableOptions}`);
+    }
+    
+    selectElement.focus();
+    selectElement.value = option.value;
+    selectElement.dispatchEvent(new Event('change', { bubbles: true }));
+    selectElement.dispatchEvent(new Event('input', { bubbles: true }));
+    
+    console.log(`✅ Selected option: "${optionText}"`);
+    
+    return {
+      success: true,
+      message: `Selected option "${optionText}" from dropdown at index ${index}`
+    };
+  }
+
+  // Main action dispatcher
+  try {
+    switch (action) {
+      case 'clickElement':
+        return clickElementByIndex(params.index);
+      case 'inputText':
+        return inputTextToElement(params.index, params.text);
+      case 'scrollToPercent':
+        return scrollToPercent(params.yPercent);
+      case 'scrollToTop':
+        return scrollToTop();
+      case 'scrollToBottom':
+        return scrollToBottom();
+      case 'scrollToText':
+        return scrollToText(params.text);
+      case 'sendKeys':
+        return sendKeys(params.keys);
+      case 'goBack':
+        return goBack();
+      case 'wait':
+        return waitAction(params.seconds);
+      case 'getDropdownOptions':
+        return getDropdownOptions(params.index);
+      case 'selectDropdownOption':
+        return selectDropdownOption(params.index, params.text);
+      default:
+        throw new Error(`Unknown browser action: ${action}`);
+    }
+  } catch (error) {
+    console.error(`❌ Browser action execution error:`, error);
+    return { 
+      success: false, 
+      error: error.message,
+      action: action
+    };
   }
 }
 

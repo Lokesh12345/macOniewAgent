@@ -1,201 +1,328 @@
-// Simplified DOM analyzer adapted from buildDomTree.js
-(function() {
-  const HIGHLIGHT_CONTAINER_ID = 'visual-agent-highlight-container';
-  let highlightIndex = 0;
+// DOM analyzer with reanalysis logic from Chrome extension
+// Handles DOM visualization and change detection
 
-  // Clean up any existing highlights first
-  function cleanup() {
-    const existingContainer = document.getElementById(HIGHLIGHT_CONTAINER_ID);
-    if (existingContainer) {
-      existingContainer.remove();
-    }
-  }
-
-  // Create or get highlight container
-  function getOrCreateContainer() {
-    let container = document.getElementById(HIGHLIGHT_CONTAINER_ID);
-    if (!container) {
-      container = document.createElement('div');
-      container.id = HIGHLIGHT_CONTAINER_ID;
-      container.style.position = 'fixed';
-      container.style.pointerEvents = 'none';
-      container.style.top = '0';
-      container.style.left = '0';
-      container.style.width = '100%';
-      container.style.height = '100%';
-      container.style.zIndex = '2147483640';
-      container.style.backgroundColor = 'transparent';
-      document.body.appendChild(container);
-    }
-    return container;
-  }
-
-  // Check if element is visible
-  function isElementVisible(element) {
-    const style = window.getComputedStyle(element);
-    return (
-      element.offsetWidth > 0 && 
-      element.offsetHeight > 0 && 
-      style.visibility !== 'hidden' && 
-      style.display !== 'none'
-    );
-  }
-
-  // Check if element is interactive (from buildDomTree.js)
-  function isInteractiveElement(element) {
-    if (!element || element.nodeType !== Node.ELEMENT_NODE) {
-      return false;
-    }
-
-    const tagName = element.tagName.toLowerCase();
-    const style = window.getComputedStyle(element);
-
-    // Interactive cursors
-    const interactiveCursors = ['pointer', 'move', 'text', 'grab'];
-    if (interactiveCursors.includes(style.cursor)) {
-      return true;
-    }
-
-    // Interactive elements
-    const interactiveElements = new Set([
-      'a', 'button', 'input', 'select', 'textarea', 'details', 
-      'summary', 'label', 'option'
-    ]);
-
-    if (interactiveElements.has(tagName)) {
-      // Check if not disabled
-      if (element.disabled || element.readOnly) {
-        return false;
+window.domAnalyzer = {
+  highlightIndex: 0,
+  HIGHLIGHT_CONTAINER_ID: 'visual-agent-highlight-container',
+  currentElementMap: {},
+  cachedPathHashes: null,
+  
+  // Initialize the DOM analyzer
+  init() {
+    this.cleanup(); // Clean any existing highlights
+    this.highlightIndex = 0;
+    this.currentElementMap = {};
+    this.cachedPathHashes = null;
+  },
+  
+  // Create visual highlights for interactive elements (fresh state)
+  visualize() {
+    this.init();
+    
+    const interactiveElements = this.findInteractiveElements();
+    const elementMap = {};
+    
+    interactiveElements.forEach((element, index) => {
+      const highlightInfo = this.highlightElement(element, index);
+      if (highlightInfo) {
+        // Store actual element reference for actions
+        this.currentElementMap[index] = element;
+        
+        elementMap[index] = {
+          tagName: element.tagName.toLowerCase(),
+          id: element.id,
+          className: element.className,
+          textContent: element.textContent?.trim().substring(0, 100),
+          boundingRect: element.getBoundingClientRect()
+        };
       }
-      return true;
-    }
+    });
+    
+    // Cache DOM hashes after visualization
+    this.cachedPathHashes = this.calcBranchPathHashSet();
+    console.log('🔍 DOM state cached with', this.cachedPathHashes.size, 'element hashes');
+    
+    return {
+      totalElements: interactiveElements.length,
+      elementMap: elementMap
+    };
+  },
 
-    // Check for contenteditable
-    if (element.getAttribute('contenteditable') === 'true' || element.isContentEditable) {
-      return true;
-    }
+  // Get cached element map (for actions)
+  getCachedElementMap() {
+    return this.currentElementMap;
+  },
 
-    // Check for role
-    const role = element.getAttribute('role');
-    const interactiveRoles = new Set([
-      'button', 'link', 'menuitem', 'radio', 'checkbox', 'tab', 
-      'switch', 'slider', 'combobox', 'textbox', 'option'
-    ]);
-    if (role && interactiveRoles.has(role)) {
-      return true;
-    }
+  // Get element by index (for actions)
+  getElementByIndex(index) {
+    return this.currentElementMap[index] || null;
+  },
 
-    // Check for click handlers
-    if (element.hasAttribute('onclick') || typeof element.onclick === 'function') {
-      return true;
-    }
-
-    return false;
-  }
-
-  // Highlight element (simplified from buildDomTree.js)
-  function highlightElement(element, index) {
-    if (!element) return null;
-
-    const container = getOrCreateContainer();
-    const rect = element.getBoundingClientRect();
-
-    if (rect.width === 0 || rect.height === 0) return null;
-
-    // Generate colors
-    const colors = [
-      '#FF0000', '#00FF00', '#0000FF', '#FFA500', 
-      '#800080', '#008080', '#FF69B4', '#4B0082'
+  // Fresh DOM analysis (like Chrome extension's getState)
+  getFreshState() {
+    console.log('🔄 Getting fresh DOM state for reanalysis');
+    return this.visualize();
+  },
+  
+  // Find interactive elements on the page
+  findInteractiveElements() {
+    const interactiveSelectors = [
+      'button',
+      'a[href]',
+      'input',
+      'select', 
+      'textarea',
+      '[onclick]',
+      '[role="button"]',
+      '[tabindex]',
+      '[contenteditable="true"]'
     ];
+    
+    const elements = [];
+    interactiveSelectors.forEach(selector => {
+      document.querySelectorAll(selector).forEach(el => {
+        if (this.isElementVisible(el) && !elements.includes(el)) {
+          elements.push(el);
+        }
+      });
+    });
+    
+    return elements;
+  },
+  
+  // Check if element is visible
+  isElementVisible(element) {
+    const rect = element.getBoundingClientRect();
+    const style = window.getComputedStyle(element);
+    
+    return (
+      rect.width > 0 && 
+      rect.height > 0 && 
+      style.visibility !== 'hidden' && 
+      style.display !== 'none' &&
+      rect.top < window.innerHeight &&
+      rect.bottom > 0 &&
+      rect.left < window.innerWidth &&
+      rect.right > 0
+    );
+  },
+  
+  // Create highlight overlay for an element
+  highlightElement(element, index) {
+    if (!element) return null;
+    
+    const container = this.getOrCreateContainer();
+    const rect = element.getBoundingClientRect();
+    
+    if (rect.width === 0 || rect.height === 0) return null;
+    
+    // Generate colors
+    const colors = ['#FF0000', '#00FF00', '#0000FF', '#FFA500', '#800080', '#008080'];
     const colorIndex = index % colors.length;
     const baseColor = colors[colorIndex];
     const backgroundColor = baseColor + '1A'; // 10% opacity
-
+    
     // Create highlight overlay
     const overlay = document.createElement('div');
-    overlay.style.position = 'fixed';
-    overlay.style.border = `2px solid ${baseColor}`;
-    overlay.style.backgroundColor = backgroundColor;
-    overlay.style.pointerEvents = 'none';
-    overlay.style.boxSizing = 'border-box';
-    overlay.style.top = `${rect.top}px`;
-    overlay.style.left = `${rect.left}px`;
-    overlay.style.width = `${rect.width}px`;
-    overlay.style.height = `${rect.height}px`;
-    overlay.style.zIndex = '2147483641';
-
+    overlay.className = 'visual-agent-highlight';
+    overlay.style.cssText = `
+      position: fixed;
+      border: 2px solid ${baseColor};
+      background-color: ${backgroundColor};
+      pointer-events: none;
+      box-sizing: border-box;
+      z-index: 2147483647;
+      top: ${rect.top}px;
+      left: ${rect.left}px;
+      width: ${rect.width}px;
+      height: ${rect.height}px;
+    `;
+    
     // Create number label
     const label = document.createElement('div');
-    label.className = 'playwright-highlight-label';
-    label.style.position = 'fixed';
-    label.style.background = baseColor;
-    label.style.color = 'white';
-    label.style.padding = '1px 4px';
-    label.style.borderRadius = '4px';
-    label.style.fontSize = '12px';
-    label.style.fontWeight = 'bold';
-    label.style.fontFamily = 'monospace';
-    label.style.zIndex = '2147483642';
+    label.className = 'visual-agent-label';
+    label.style.cssText = `
+      position: fixed;
+      background: ${baseColor};
+      color: white;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 12px;
+      font-weight: bold;
+      font-family: monospace;
+      z-index: 2147483648;
+      top: ${Math.max(0, rect.top - 20)}px;
+      left: ${rect.left}px;
+    `;
     label.textContent = index.toString();
-
-    // Position label
-    let labelTop = rect.top + 2;
-    let labelLeft = rect.left + rect.width - 20;
-
-    // Adjust if too small
-    if (rect.width < 30 || rect.height < 20) {
-      labelTop = rect.top - 18;
-      labelLeft = rect.left;
-    }
-
-    label.style.top = `${Math.max(0, labelTop)}px`;
-    label.style.left = `${Math.max(0, labelLeft)}px`;
-
+    
     container.appendChild(overlay);
     container.appendChild(label);
-
-    return { overlay, label, rect };
-  }
-
-  // Main visualization function
-  function visualize() {
-    cleanup();
-    highlightIndex = 0;
-
-    const allElements = document.querySelectorAll('*');
-    const elementMap = {};
-    let totalHighlighted = 0;
-
-    allElements.forEach(element => {
-      if (isElementVisible(element) && isInteractiveElement(element)) {
-        const highlightInfo = highlightElement(element, highlightIndex);
-        if (highlightInfo) {
-          elementMap[highlightIndex] = {
-            tagName: element.tagName.toLowerCase(),
-            id: element.id,
-            className: element.className,
-            text: element.textContent?.trim().substring(0, 50),
-            rect: highlightInfo.rect
-          };
-          highlightIndex++;
-          totalHighlighted++;
-        }
-      }
-    });
-
-    console.log(`👁️ Highlighted ${totalHighlighted} interactive elements`);
     
     return {
-      totalElements: totalHighlighted,
-      elementMap: elementMap
+      overlay,
+      label,
+      rect
     };
+  },
+  
+  // Get or create highlight container
+  getOrCreateContainer() {
+    let container = document.getElementById(this.HIGHLIGHT_CONTAINER_ID);
+    if (!container) {
+      container = document.createElement('div');
+      container.id = this.HIGHLIGHT_CONTAINER_ID;
+      container.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+        z-index: 2147483640;
+      `;
+      document.body.appendChild(container);
+    }
+    return container;
+  },
+  
+  // Clean up all highlights
+  cleanup() {
+    const container = document.getElementById(this.HIGHLIGHT_CONTAINER_ID);
+    if (container) {
+      container.remove();
+    }
+  },
+
+  // Calculate DOM branch path hash set (from Chrome extension)
+  calcBranchPathHashSet() {
+    const hashes = new Set();
+    
+    // Get all currently interactive elements
+    const elements = this.findInteractiveElements();
+    
+    elements.forEach(element => {
+      try {
+        const hash = this.hashDomElement(element);
+        hashes.add(hash);
+      } catch (error) {
+        console.warn('Failed to hash element:', error);
+      }
+    });
+    
+    return hashes;
+  },
+
+  // Hash a DOM element for identification (simplified from Chrome extension)
+  hashDomElement(element) {
+    const parentBranchPath = this.getParentBranchPath(element);
+    const attributes = this.getElementAttributes(element);
+    const xpath = this.getElementXPath(element);
+    
+    // Simple string concatenation hash (Chrome extension uses SHA-256)
+    return `${parentBranchPath.join('/')}-${JSON.stringify(attributes)}-${xpath}`;
+  },
+
+  // Get parent branch path
+  getParentBranchPath(element) {
+    const parents = [];
+    let currentElement = element;
+    
+    while (currentElement && currentElement !== document.body) {
+      parents.unshift(currentElement.tagName.toLowerCase());
+      currentElement = currentElement.parentElement;
+    }
+    
+    return parents;
+  },
+
+  // Get element attributes
+  getElementAttributes(element) {
+    const attributes = {};
+    
+    // Only include key attributes for hashing
+    const keyAttributes = ['id', 'class', 'type', 'role', 'href', 'name'];
+    
+    keyAttributes.forEach(attr => {
+      const value = element.getAttribute(attr);
+      if (value) {
+        attributes[attr] = value;
+      }
+    });
+    
+    return attributes;
+  },
+
+  // Get element XPath (simplified)
+  getElementXPath(element) {
+    if (element.id) {
+      return `//*[@id="${element.id}"]`;
+    }
+    
+    const parts = [];
+    let current = element;
+    
+    while (current && current !== document.body) {
+      let index = 1;
+      let sibling = current.previousElementSibling;
+      
+      while (sibling) {
+        if (sibling.tagName === current.tagName) {
+          index++;
+        }
+        sibling = sibling.previousElementSibling;
+      }
+      
+      parts.unshift(`${current.tagName.toLowerCase()}[${index}]`);
+      current = current.parentElement;
+    }
+    
+    return `/${parts.join('/')}`;
+  },
+
+  // Check if DOM has changed (key function from Chrome extension)
+  hasObstructionOccurred() {
+    if (!this.cachedPathHashes) {
+      console.log('🚧 OBSTRUCTION: No cached hashes, considering changed');
+      return true;
+    }
+    
+    const newPathHashes = this.calcBranchPathHashSet();
+    
+    // Check if new hashes are a subset of cached hashes
+    for (const hash of newPathHashes) {
+      if (!this.cachedPathHashes.has(hash)) {
+        console.log('🚧 OBSTRUCTION: DETECTED - New elements appeared');
+        console.log('🔍 New hash found:', hash);
+        return true;
+      }
+    }
+    
+    console.log('🚧 OBSTRUCTION: NONE - DOM unchanged');
+    return false;
+  },
+
+  // Detect autocomplete appearance (simplified)
+  hasAutocompleteAppeared() {
+    // Look for common autocomplete elements
+    const autocompleteSelectors = [
+      '[role="listbox"]',
+      '.autocomplete',
+      '.suggestions',
+      '.dropdown-menu',
+      '.ui-autocomplete'
+    ];
+    
+    for (const selector of autocompleteSelectors) {
+      const elements = document.querySelectorAll(selector);
+      for (const element of elements) {
+        if (this.isElementVisible(element)) {
+          console.log('🎯 AUTOCOMPLETE: Detected', selector);
+          return true;
+        }
+      }
+    }
+    
+    return false;
   }
-
-  // Export for use
-  window.domAnalyzer = {
-    visualize: visualize,
-    cleanup: cleanup
-  };
-
-  console.log('✅ DOM Analyzer loaded');
-})();
+};

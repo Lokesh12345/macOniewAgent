@@ -1,17 +1,21 @@
-// Simple DOM analyzer that creates visual highlights with numbered overlays
-// Extracts the core highlighting functionality from buildDomTree.js
+// DOM analyzer with reanalysis logic from Chrome extension
+// Handles DOM visualization and change detection
 
 window.domAnalyzer = {
   highlightIndex: 0,
   HIGHLIGHT_CONTAINER_ID: 'visual-agent-highlight-container',
+  currentElementMap: {},
+  cachedPathHashes: null,
   
   // Initialize the DOM analyzer
   init() {
     this.cleanup(); // Clean any existing highlights
     this.highlightIndex = 0;
+    this.currentElementMap = {};
+    this.cachedPathHashes = null;
   },
   
-  // Create visual highlights for interactive elements
+  // Create visual highlights for interactive elements (fresh state)
   visualize() {
     this.init();
     
@@ -21,8 +25,10 @@ window.domAnalyzer = {
     interactiveElements.forEach((element, index) => {
       const highlightInfo = this.highlightElement(element, index);
       if (highlightInfo) {
+        // Store actual element reference for actions
+        this.currentElementMap[index] = element;
+        
         elementMap[index] = {
-          element: element,
           tagName: element.tagName.toLowerCase(),
           id: element.id,
           className: element.className,
@@ -32,10 +38,30 @@ window.domAnalyzer = {
       }
     });
     
+    // Cache DOM hashes after visualization
+    this.cachedPathHashes = this.calcBranchPathHashSet();
+    console.log('🔍 DOM state cached with', this.cachedPathHashes.size, 'element hashes');
+    
     return {
       totalElements: interactiveElements.length,
       elementMap: elementMap
     };
+  },
+
+  // Get cached element map (for actions)
+  getCachedElementMap() {
+    return this.currentElementMap;
+  },
+
+  // Get element by index (for actions)
+  getElementByIndex(index) {
+    return this.currentElementMap[index] || null;
+  },
+
+  // Fresh DOM analysis (like Chrome extension's getState)
+  getFreshState() {
+    console.log('🔄 Getting fresh DOM state for reanalysis');
+    return this.visualize();
   },
   
   // Find interactive elements on the page
@@ -166,5 +192,137 @@ window.domAnalyzer = {
     if (container) {
       container.remove();
     }
+  },
+
+  // Calculate DOM branch path hash set (from Chrome extension)
+  calcBranchPathHashSet() {
+    const hashes = new Set();
+    
+    // Get all currently interactive elements
+    const elements = this.findInteractiveElements();
+    
+    elements.forEach(element => {
+      try {
+        const hash = this.hashDomElement(element);
+        hashes.add(hash);
+      } catch (error) {
+        console.warn('Failed to hash element:', error);
+      }
+    });
+    
+    return hashes;
+  },
+
+  // Hash a DOM element for identification (simplified from Chrome extension)
+  hashDomElement(element) {
+    const parentBranchPath = this.getParentBranchPath(element);
+    const attributes = this.getElementAttributes(element);
+    const xpath = this.getElementXPath(element);
+    
+    // Simple string concatenation hash (Chrome extension uses SHA-256)
+    return `${parentBranchPath.join('/')}-${JSON.stringify(attributes)}-${xpath}`;
+  },
+
+  // Get parent branch path
+  getParentBranchPath(element) {
+    const parents = [];
+    let currentElement = element;
+    
+    while (currentElement && currentElement !== document.body) {
+      parents.unshift(currentElement.tagName.toLowerCase());
+      currentElement = currentElement.parentElement;
+    }
+    
+    return parents;
+  },
+
+  // Get element attributes
+  getElementAttributes(element) {
+    const attributes = {};
+    
+    // Only include key attributes for hashing
+    const keyAttributes = ['id', 'class', 'type', 'role', 'href', 'name'];
+    
+    keyAttributes.forEach(attr => {
+      const value = element.getAttribute(attr);
+      if (value) {
+        attributes[attr] = value;
+      }
+    });
+    
+    return attributes;
+  },
+
+  // Get element XPath (simplified)
+  getElementXPath(element) {
+    if (element.id) {
+      return `//*[@id="${element.id}"]`;
+    }
+    
+    const parts = [];
+    let current = element;
+    
+    while (current && current !== document.body) {
+      let index = 1;
+      let sibling = current.previousElementSibling;
+      
+      while (sibling) {
+        if (sibling.tagName === current.tagName) {
+          index++;
+        }
+        sibling = sibling.previousElementSibling;
+      }
+      
+      parts.unshift(`${current.tagName.toLowerCase()}[${index}]`);
+      current = current.parentElement;
+    }
+    
+    return `/${parts.join('/')}`;
+  },
+
+  // Check if DOM has changed (key function from Chrome extension)
+  hasObstructionOccurred() {
+    if (!this.cachedPathHashes) {
+      console.log('🚧 OBSTRUCTION: No cached hashes, considering changed');
+      return true;
+    }
+    
+    const newPathHashes = this.calcBranchPathHashSet();
+    
+    // Check if new hashes are a subset of cached hashes
+    for (const hash of newPathHashes) {
+      if (!this.cachedPathHashes.has(hash)) {
+        console.log('🚧 OBSTRUCTION: DETECTED - New elements appeared');
+        console.log('🔍 New hash found:', hash);
+        return true;
+      }
+    }
+    
+    console.log('🚧 OBSTRUCTION: NONE - DOM unchanged');
+    return false;
+  },
+
+  // Detect autocomplete appearance (simplified)
+  hasAutocompleteAppeared() {
+    // Look for common autocomplete elements
+    const autocompleteSelectors = [
+      '[role="listbox"]',
+      '.autocomplete',
+      '.suggestions',
+      '.dropdown-menu',
+      '.ui-autocomplete'
+    ];
+    
+    for (const selector of autocompleteSelectors) {
+      const elements = document.querySelectorAll(selector);
+      for (const element of elements) {
+        if (this.isElementVisible(element)) {
+          console.log('🎯 AUTOCOMPLETE: Detected', selector);
+          return true;
+        }
+      }
+    }
+    
+    return false;
   }
 };

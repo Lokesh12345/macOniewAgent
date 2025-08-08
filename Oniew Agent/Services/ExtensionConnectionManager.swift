@@ -267,6 +267,24 @@ class ExtensionConnectionManager: ObservableObject {
                     self?.handleDOMVisualizationResponse(data, success: false)
                 }
                 
+            case "browser_action_complete":
+                print("⚡ Browser action completed successfully")
+                if let data = message["data"] as? [String: Any] {
+                    self?.handleBrowserActionResponse(data, success: true)
+                }
+                
+            case "browser_action_error":
+                print("❌ Browser action failed")
+                if let data = message["data"] as? [String: Any] {
+                    self?.handleBrowserActionResponse(data, success: false)
+                }
+                
+            case "browser_action_reanalysis_needed":
+                print("🔄 Browser action requires DOM reanalysis")
+                if let data = message["data"] as? [String: Any] {
+                    self?.handleBrowserActionReanalysis(data)
+                }
+                
             default:
                 // Check for registered handlers
                 if let handler = self?.messageHandlers[messageType] {
@@ -573,6 +591,42 @@ class ExtensionConnectionManager: ObservableObject {
             name: Notification.Name("DOMVisualizationResponse"),
             object: nil,
             userInfo: responseData
+        )
+    }
+    
+    private func handleBrowserActionResponse(_ data: [String: Any], success: Bool) {
+        print("⚡ Processing browser action response - Success: \(success)")
+        
+        var responseData = data
+        responseData["success"] = success
+        
+        // Post notification for browser action response
+        NotificationCenter.default.post(
+            name: Notification.Name("BrowserActionResponse"),
+            object: nil,
+            userInfo: responseData
+        )
+    }
+    
+    private func handleBrowserActionReanalysis(_ data: [String: Any]) {
+        print("🔄 Processing DOM reanalysis request")
+        print("📊 Reanalysis reason: \(data["error"] ?? "Unknown")")
+        
+        var reanalysisData = data
+        reanalysisData["reanalysisNeeded"] = true
+        
+        // Post notification for reanalysis needed
+        NotificationCenter.default.post(
+            name: Notification.Name("DOMReanalysisNeeded"),
+            object: nil,
+            userInfo: reanalysisData
+        )
+        
+        // Also send to browser action response for UI display
+        NotificationCenter.default.post(
+            name: Notification.Name("BrowserActionResponse"),
+            object: nil,
+            userInfo: reanalysisData
         )
     }
     
