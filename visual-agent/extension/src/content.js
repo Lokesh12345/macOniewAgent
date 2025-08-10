@@ -1098,6 +1098,9 @@ window.domAnalyzer = {
     // Start scroll detection to catch lazy loading and infinite scroll
     this.startScrollDetection();
     
+    // Start intelligent SPA monitoring to detect delayed content loading
+    this.startSPAMonitoring();
+    
     return {
       totalElements: elementCount,
       elementMap: elementMap
@@ -1269,6 +1272,287 @@ window.domAnalyzer = {
       this.scrollState.lastScrollY = currentScrollY;
       this.scrollState.lastScrollHeight = currentScrollHeight;
     }
+  },
+  
+  // SPA Stability Detection Engine - intelligent detection of when SPA content has finished loading
+  stabilityEngine: {
+    isActive: false,
+    startTime: null,
+    
+    // Multi-signal monitoring
+    signals: {
+      domMutationRate: 0,
+      networkActivity: 0,
+      browserIdle: false,
+      significantContentAdded: false
+    },
+    
+    // Observers
+    mutationObserver: null,
+    performanceObserver: null,
+    idleCallbackId: null,
+    
+    // Configuration
+    config: {
+      stabilityThreshold: 500, // ms of quiet time required
+      maxWaitTime: 5000, // max ms to wait for stability
+      mutationRateThreshold: 5, // mutations per second threshold
+      significantElementThreshold: 3, // new elements to be considered significant
+      checkInterval: 250 // how often to check stability
+    },
+    
+    // Statistics tracking
+    stats: {
+      totalMutations: 0,
+      totalNetworkRequests: 0,
+      lastMutationTime: 0,
+      lastNetworkTime: 0,
+      initialElementCount: 0
+    }
+  },
+  
+  // Start intelligent SPA monitoring after visualization/navigation
+  startSPAMonitoring() {
+    if (this.stabilityEngine.isActive) {
+      this.stopSPAMonitoring();
+    }
+    
+    console.log('🧠 Starting intelligent SPA stability monitoring');
+    
+    const engine = this.stabilityEngine;
+    engine.isActive = true;
+    engine.startTime = performance.now();
+    engine.stats.initialElementCount = Object.keys(this.currentElementMap).length;
+    
+    // Reset signals
+    Object.keys(engine.signals).forEach(key => {
+      engine.signals[key] = key === 'browserIdle' ? false : 0;
+    });
+    
+    // Start DOM mutation monitoring
+    this.startDOMMutationMonitoring();
+    
+    // Start network activity monitoring  
+    this.startNetworkMonitoring();
+    
+    // Start browser idle detection
+    this.startIdleDetection();
+    
+    // Start periodic stability checks
+    this.startStabilityChecking();
+  },
+  
+  // Stop all SPA monitoring
+  stopSPAMonitoring() {
+    console.log('🧠 Stopping SPA stability monitoring');
+    
+    const engine = this.stabilityEngine;
+    engine.isActive = false;
+    
+    // Clean up observers
+    if (engine.mutationObserver) {
+      engine.mutationObserver.disconnect();
+      engine.mutationObserver = null;
+    }
+    
+    if (engine.performanceObserver) {
+      engine.performanceObserver.disconnect();
+      engine.performanceObserver = null;
+    }
+    
+    if (engine.idleCallbackId) {
+      cancelIdleCallback(engine.idleCallbackId);
+      engine.idleCallbackId = null;
+    }
+    
+    if (engine.checkIntervalId) {
+      clearInterval(engine.checkIntervalId);
+      engine.checkIntervalId = null;
+    }
+  },
+  
+  // Monitor DOM mutations with rate calculation
+  startDOMMutationMonitoring() {
+    const engine = this.stabilityEngine;
+    
+    engine.mutationObserver = new MutationObserver((mutations) => {
+      const now = performance.now();
+      engine.stats.totalMutations += mutations.length;
+      engine.stats.lastMutationTime = now;
+      
+      // Check for significant content additions
+      let significantAdditions = 0;
+      mutations.forEach(mutation => {
+        if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
+          mutation.addedNodes.forEach(node => {
+            if (node.nodeType === Node.ELEMENT_NODE) {
+              // Check if it's a significant container (has children or specific patterns)
+              const isSignificant = node.children?.length > 2 || 
+                                   node.classList?.length > 0 ||
+                                   node.tagName?.toLowerCase() === 'section' ||
+                                   node.tagName?.toLowerCase() === 'article' ||
+                                   node.tagName?.toLowerCase() === 'aside';
+              
+              if (isSignificant) {
+                significantAdditions++;
+              }
+            }
+          });
+        }
+      });
+      
+      if (significantAdditions >= engine.config.significantElementThreshold) {
+        engine.signals.significantContentAdded = true;
+        console.log('🧠 Significant content added:', significantAdditions, 'new containers');
+      }
+    });
+    
+    // Observe entire document but with optimizations
+    engine.mutationObserver.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: false, // Skip attribute changes for performance
+      characterData: false // Skip text changes for performance
+    });
+  },
+  
+  // Monitor network activity via Performance API
+  startNetworkMonitoring() {
+    const engine = this.stabilityEngine;
+    
+    // Monitor resource loading
+    if (window.PerformanceObserver) {
+      engine.performanceObserver = new PerformanceObserver((list) => {
+        const entries = list.getEntries();
+        entries.forEach(entry => {
+          if (entry.entryType === 'resource') {
+            engine.stats.totalNetworkRequests++;
+            engine.stats.lastNetworkTime = performance.now();
+            engine.signals.networkActivity++;
+            
+            console.log('🧠 Network activity:', entry.name.split('/').pop(), 'loaded');
+          }
+        });
+      });
+      
+      engine.performanceObserver.observe({
+        entryTypes: ['resource', 'navigation']
+      });
+    }
+  },
+  
+  // Detect browser idle state
+  startIdleDetection() {
+    const engine = this.stabilityEngine;
+    
+    const scheduleIdleCheck = () => {
+      if (!engine.isActive) return;
+      
+      engine.idleCallbackId = requestIdleCallback((idleDeadline) => {
+        if (idleDeadline.timeRemaining() > 10) {
+          engine.signals.browserIdle = true;
+        } else {
+          engine.signals.browserIdle = false;
+        }
+        
+        // Schedule next check
+        setTimeout(scheduleIdleCheck, 100);
+      }, { timeout: 100 });
+    };
+    
+    scheduleIdleCheck();
+  },
+  
+  // Periodic stability assessment
+  startStabilityChecking() {
+    const engine = this.stabilityEngine;
+    
+    engine.checkIntervalId = setInterval(() => {
+      this.checkStability();
+    }, engine.config.checkInterval);
+  },
+  
+  // Assess if the page has reached stability
+  checkStability() {
+    const engine = this.stabilityEngine;
+    
+    if (!engine.isActive) return;
+    
+    const now = performance.now();
+    const elapsed = now - engine.startTime;
+    
+    // Calculate mutation rate (mutations per second)
+    const timeSinceLastMutation = now - engine.stats.lastMutationTime;
+    const timeSinceLastNetwork = now - engine.stats.lastNetworkTime;
+    
+    const isDOMQuiet = timeSinceLastMutation > engine.config.stabilityThreshold;
+    const isNetworkQuiet = timeSinceLastNetwork > engine.config.stabilityThreshold;
+    const hasSignificantContent = engine.signals.significantContentAdded;
+    const isOverMaxTime = elapsed > engine.config.maxWaitTime;
+    
+    console.log('🧠 Stability check:', {
+      elapsed: Math.round(elapsed),
+      domQuiet: isDOMQuiet,
+      networkQuiet: isNetworkQuiet, 
+      browserIdle: engine.signals.browserIdle,
+      significantContent: hasSignificantContent,
+      mutations: engine.stats.totalMutations,
+      networkRequests: engine.stats.totalNetworkRequests
+    });
+    
+    // Determine if stable
+    const isStable = (isDOMQuiet && isNetworkQuiet && engine.signals.browserIdle) || isOverMaxTime;
+    
+    if (isStable) {
+      console.log('🧠 Page stability achieved after', Math.round(elapsed), 'ms');
+      
+      // Check if new content was actually added
+      if (hasSignificantContent || isOverMaxTime) {
+        this.handleStabilityAchieved();
+      } else {
+        console.log('🧠 Stable but no significant content added');
+        this.stopSPAMonitoring();
+      }
+    }
+  },
+  
+  // Handle when stability is achieved with new content
+  handleStabilityAchieved() {
+    console.log('🧠 Stability achieved - checking for new elements');
+    
+    // Re-analyze to see if new interactive elements appeared
+    const currentState = this.visualize();
+    const newElementCount = currentState.totalElements;
+    const initialCount = this.stabilityEngine.stats.initialElementCount;
+    const elementDelta = newElementCount - initialCount;
+    
+    console.log(`🧠 Element analysis: ${initialCount} → ${newElementCount} (Δ${elementDelta})`);
+    
+    if (elementDelta > 0) {
+      console.log('🚨 New elements found after SPA stability!');
+      console.log(`🔄 ${elementDelta} new interactive elements detected`);
+      
+      // Send SPA content change event to background script
+      chrome.runtime.sendMessage({
+        type: 'spa_content_loaded',
+        data: {
+          elementDelta: elementDelta,
+          newElementCount: newElementCount,
+          stabilityTime: performance.now() - this.stabilityEngine.startTime,
+          mutationCount: this.stabilityEngine.stats.totalMutations,
+          networkRequests: this.stabilityEngine.stats.totalNetworkRequests,
+          url: window.location.href,
+          timestamp: Date.now()
+        }
+      }).catch(() => {
+        console.log('Failed to send SPA content loaded message');
+      });
+      
+      // Update cached state
+      this.cachedPathHashes = this.calcBranchPathHashSet();
+    }
+    
+    this.stopSPAMonitoring();
   },
   
   // Automatic reanalysis logic - exact copy from Chrome extension

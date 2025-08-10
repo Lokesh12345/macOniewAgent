@@ -315,6 +315,12 @@ class ExtensionConnectionManager: ObservableObject {
                     self?.handleScrollDOMChanged(data)
                 }
                 
+            case "spa_content_loaded":
+                print("🎯 SPA content loaded detected")
+                if let data = message["data"] as? [String: Any] {
+                    self?.handleSPAContentLoaded(data)
+                }
+                
             default:
                 // Check for registered handlers
                 if let handler = self?.messageHandlers[messageType] {
@@ -756,6 +762,30 @@ class ExtensionConnectionManager: ObservableObject {
             name: Notification.Name("DOMReanalysisNeeded"),
             object: nil,
             userInfo: scrollData
+        )
+    }
+    
+    private func handleSPAContentLoaded(_ data: [String: Any]) {
+        print("🎯 Processing SPA content loaded")
+        print("📊 Stability signals: DOM mutations \(data["domMutationCount"] ?? 0), network requests \(data["networkRequestCount"] ?? 0)")
+        print("📊 Elements added: \(data["elementsAdded"] ?? 0)")
+        
+        var spaContentData = data
+        spaContentData["reanalysisNeeded"] = true
+        spaContentData["reason"] = "spa_content_loaded"
+        
+        // Post notification for SPA content loaded
+        NotificationCenter.default.post(
+            name: Notification.Name("SPAContentLoadedDetected"),
+            object: nil,
+            userInfo: spaContentData
+        )
+        
+        // Also trigger reanalysis as new content has loaded
+        NotificationCenter.default.post(
+            name: Notification.Name("DOMReanalysisNeeded"),
+            object: nil,
+            userInfo: spaContentData
         )
     }
     

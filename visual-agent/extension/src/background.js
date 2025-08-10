@@ -125,6 +125,10 @@ async function handleMessage(message) {
       console.log('⚡ Extension: Processing browser action request');
       await executeBrowserAction(message.data);
       break;
+    case 'spa_content_loaded':
+      console.log('🎯 Extension: SPA content loaded event');
+      // Just acknowledge - actual handling is done by content script
+      break;
   }
 }
 
@@ -1033,6 +1037,21 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
         ...request.data,
         reanalysisNeeded: true,
         message: `${request.data.elementDelta} new elements appeared after scrolling`
+      }
+    });
+    
+    sendResponse({ success: true });
+  } else if (request.type === 'spa_content_loaded') {
+    console.log('🎯 Content script detected SPA content loaded');
+    console.log('📊 SPA stability data:', request.data);
+    
+    // Send SPA content loaded event to Mac app
+    sendMessage({
+      type: 'spa_content_loaded',
+      data: {
+        ...request.data,
+        reanalysisNeeded: true,
+        message: 'SPA content has finished loading - new elements detected'
       }
     });
     
