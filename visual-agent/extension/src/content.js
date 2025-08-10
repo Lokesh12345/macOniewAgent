@@ -1034,6 +1034,8 @@ window.domAnalyzer = {
     this.init();
     
     console.log('🔍 Using Chrome extension buildDomTree implementation');
+    console.log('🕐 Visualize called at:', new Date().toISOString());
+    console.log('🌐 Current URL:', window.location.href);
     
     // Use Chrome extension's buildDomTree with highlighting enabled
     const result = window.buildDomTree({
@@ -1089,6 +1091,13 @@ window.domAnalyzer = {
     
     console.log(`🔍 Found ${elementCount} interactive elements with buildDomTree`);
     
+    // Cache DOM hashes after visualization for automatic reanalysis (Chrome extension logic)
+    this.cachedPathHashes = this.calcBranchPathHashSet();
+    console.log('🔍 DOM state cached with', this.cachedPathHashes.size, 'element hashes');
+    
+    // Start scroll detection to catch lazy loading and infinite scroll
+    this.startScrollDetection();
+    
     return {
       totalElements: elementCount,
       elementMap: elementMap
@@ -1121,7 +1130,18 @@ window.domAnalyzer = {
 
   // Get element by index (for actions)
   getElementByIndex(index) {
-    return this.currentElementMap[index] || null;
+    console.log(`🔍 Looking for element at index ${index}`);
+    console.log(`📊 Current element map has ${Object.keys(this.currentElementMap).length} elements`);
+    console.log(`📊 Available indices: ${Object.keys(this.currentElementMap).join(', ')}`);
+    
+    const element = this.currentElementMap[index] || null;
+    if (!element) {
+      console.log(`❌ Element at index ${index} not found!`);
+      console.log(`📊 Element map keys:`, Object.keys(this.currentElementMap));
+    } else {
+      console.log(`✅ Found element at index ${index}:`, element.tagName, element.className);
+    }
+    return element;
   },
 
   // Fresh DOM analysis (like Chrome extension's getState)
@@ -1138,69 +1158,284 @@ window.domAnalyzer = {
     }
   },
   
-  // Stub methods for compatibility (using buildDomTree now)
+  // Navigation handling - clear state when page changes
+  handleNavigation(url) {
+    console.log('🔄 DOM Analyzer: Handling navigation to', url);
+    this.stopScrollDetection(); // Stop scroll detection on navigation
+    this.cleanup();
+    this.init();
+    this.cachedPathHashes = null;
+    this.domChangedAfterInput = false;
+  },
+  
+  // Scroll detection state
+  scrollState: {
+    lastScrollY: window.scrollY || 0,
+    lastScrollHeight: document.documentElement.scrollHeight || 0,
+    lastElementCount: 0,
+    scrollTimeout: null,
+    isDetectionActive: false
+  },
+  
+  // Start scroll detection (called after visualization)
+  startScrollDetection() {
+    if (this.scrollState.isDetectionActive) return;
+    
+    console.log('📜 Starting scroll detection');
+    this.scrollState.isDetectionActive = true;
+    this.scrollState.lastScrollY = window.scrollY || 0;
+    this.scrollState.lastScrollHeight = document.documentElement.scrollHeight || 0;
+    this.scrollState.lastElementCount = Object.keys(this.currentElementMap).length;
+    
+    // Add scroll event listener with throttling
+    window.addEventListener('scroll', this.handleScroll.bind(this), { passive: true });
+  },
+  
+  // Stop scroll detection
+  stopScrollDetection() {
+    console.log('📜 Stopping scroll detection');
+    this.scrollState.isDetectionActive = false;
+    window.removeEventListener('scroll', this.handleScroll.bind(this));
+    
+    if (this.scrollState.scrollTimeout) {
+      clearTimeout(this.scrollState.scrollTimeout);
+      this.scrollState.scrollTimeout = null;
+    }
+  },
+  
+  // Handle scroll events (throttled)
+  handleScroll() {
+    if (!this.scrollState.isDetectionActive) return;
+    
+    // Clear previous timeout
+    if (this.scrollState.scrollTimeout) {
+      clearTimeout(this.scrollState.scrollTimeout);
+    }
+    
+    // Debounce scroll events - check for DOM changes 1 second after scrolling stops
+    this.scrollState.scrollTimeout = setTimeout(() => {
+      this.checkScrollBasedDOMChanges();
+    }, 1000);
+  },
+  
+  // Check if scroll caused DOM changes (lazy loading, infinite scroll, etc.)
+  checkScrollBasedDOMChanges() {
+    const currentScrollY = window.scrollY || 0;
+    const currentScrollHeight = document.documentElement.scrollHeight || 0;
+    const scrollDelta = Math.abs(currentScrollY - this.scrollState.lastScrollY);
+    const heightDelta = currentScrollHeight - this.scrollState.lastScrollHeight;
+    
+    console.log('📜 Checking scroll-based DOM changes');
+    console.log(`📊 Scroll delta: ${scrollDelta}px, Height delta: ${heightDelta}px`);
+    
+    // Significant scroll (>200px) or page height changed (new content loaded)
+    if (scrollDelta > 200 || heightDelta > 100) {
+      console.log('📜 Significant scroll detected, checking for new content');
+      
+      // Re-analyze to see if new interactive elements appeared
+      const currentState = this.visualize();
+      const newElementCount = currentState.totalElements;
+      const elementDelta = newElementCount - this.scrollState.lastElementCount;
+      
+      console.log(`📊 Element count changed: ${this.scrollState.lastElementCount} → ${newElementCount} (Δ${elementDelta})`);
+      
+      // If new elements appeared, notify that reanalysis may be needed
+      if (elementDelta > 0) {
+        console.log('🚨 New elements appeared after scroll!');
+        console.log(`🔄 ${elementDelta} new interactive elements detected`);
+        
+        // Send scroll-based DOM change event to background script
+        chrome.runtime.sendMessage({
+          type: 'scroll_dom_changed',
+          data: {
+            scrollDelta: scrollDelta,
+            heightDelta: heightDelta,
+            elementDelta: elementDelta,
+            newElementCount: newElementCount,
+            url: window.location.href,
+            timestamp: Date.now()
+          }
+        }).catch(() => {
+          // Background script might not be ready
+          console.log('Failed to send scroll DOM change message');
+        });
+        
+        // Update our tracking state
+        this.scrollState.lastElementCount = newElementCount;
+        this.cachedPathHashes = this.calcBranchPathHashSet(); // Update cached state
+      }
+      
+      // Update scroll tracking state
+      this.scrollState.lastScrollY = currentScrollY;
+      this.scrollState.lastScrollHeight = currentScrollHeight;
+    }
+  },
+  
+  // Automatic reanalysis logic - exact copy from Chrome extension
   calcBranchPathHashSet() {
-    return new Set();
+    if (!this.currentElementMap || Object.keys(this.currentElementMap).length === 0) {
+      console.log('📊 No current elements for hash calculation');
+      return new Set();
+    }
+    
+    const hashes = new Set();
+    
+    // Hash all currently interactive elements (like Chrome extension)
+    Object.values(this.currentElementMap).forEach(element => {
+      try {
+        if (element && element.isConnected) {
+          // Simple hash based on element path and attributes (like Chrome extension)
+          const tagName = element.tagName.toLowerCase();
+          const id = element.id || '';
+          const className = element.className || '';
+          const xpath = this.getElementXPath(element);
+          const hash = `${tagName}-${id}-${className}-${xpath}`;
+          hashes.add(hash);
+        }
+      } catch (error) {
+        console.warn('Failed to hash element:', error);
+      }
+    });
+    
+    console.log(`📊 Calculated ${hashes.size} element hashes`);
+    return hashes;
   },
   
+  // Check for DOM obstruction (EXACT Chrome extension logic with Set subset check)
   hasObstructionOccurred() {
+    if (!this.cachedPathHashes) {
+      console.log('🚧 OBSTRUCTION: No cached hashes, considering changed');
+      return true;
+    }
+    
+    const newPathHashes = this.calcBranchPathHashSet();
+    
+    // EXACT Chrome extension logic: !newPathHashes.isSubsetOf(cachedPathHashes)
+    // Implement isSubsetOf: check if all new hashes exist in cached hashes
+    const isSubsetOf = (newSet, cachedSet) => {
+      for (const hash of newSet) {
+        if (!cachedSet.has(hash)) {
+          return false; // Found a new hash that wasn't cached
+        }
+      }
+      return true; // All new hashes were in cached set
+    };
+    
+    // Chrome extension condition: if new hashes are NOT a subset of cached hashes
+    if (!isSubsetOf(newPathHashes, this.cachedPathHashes)) {
+      console.log('🚧 OBSTRUCTION: DETECTED - Something new appeared (Chrome extension logic)');
+      console.log('📊 Cached hashes:', this.cachedPathHashes.size);
+      console.log('📊 New hashes:', newPathHashes.size);
+      
+      // Log what's new (for debugging)
+      const newHashes = [];
+      for (const hash of newPathHashes) {
+        if (!this.cachedPathHashes.has(hash)) {
+          newHashes.push(hash.substring(0, 50) + '...');
+        }
+      }
+      console.log('🔍 New elements detected:', newHashes.slice(0, 3));
+      
+      return true;
+    }
+    
+    console.log('🚧 OBSTRUCTION: NONE - DOM unchanged (subset check passed)');
     return false;
   },
   
+  // Dynamic autocomplete detection - NO HARDCODED SELECTORS (Chrome extension approach)
   hasAutocompleteAppeared() {
-    return false;
+    // Chrome extension approach: Don't hardcode autocomplete detection
+    // Instead, rely on the dynamic DOM hash comparison in hasObstructionOccurred()
+    // Autocomplete elements will be detected as "new elements" automatically
+    return false; // Let hasObstructionOccurred() handle all dynamic changes
+  },
+  
+  // Helper method for XPath (reused from old implementation)
+  getElementXPath(element) {
+    if (!element) return '';
+    
+    if (element.id) {
+      return `//*[@id="${element.id}"]`;
+    }
+    
+    const parts = [];
+    let current = element;
+    
+    while (current && current !== document.body) {
+      let index = 1;
+      let sibling = current.previousElementSibling;
+      
+      while (sibling) {
+        if (sibling.tagName === current.tagName) {
+          index++;
+        }
+        sibling = sibling.previousElementSibling;
+      }
+      
+      parts.unshift(`${current.tagName.toLowerCase()}[${index}]`);
+      current = current.parentElement;
+    }
+    
+    return `/${parts.join('/')}`;
   }
 };
 
 // Browser action functions - all embedded in content script for persistence
-function performBrowserAction(action, params) {
+// Make it globally accessible for chrome.scripting.executeScript
+window.performBrowserAction = async function performBrowserAction(action, params) {
   console.log(`⚡ Performing browser action: ${action}`, params);
   
-  // Check if this is an indexed action (requires reanalysis)
+  // Check if this is an indexed action (requires reanalysis) - exact Chrome extension logic
   const indexedActions = ['clickElement', 'inputText', 'getDropdownOptions', 'selectDropdownOption'];
   const isIndexedAction = indexedActions.includes(action) && params.index !== undefined;
   
-  // DOM reanalysis logic (copied from Chrome extension)
+  // DOM reanalysis logic - EXACT COPY from Chrome extension (dynamic approach)
   if (isIndexedAction) {
     console.log('🔄 Indexed action detected, checking DOM state...');
     
     // Only check if DOM analyzer is available and has been run
     if (window.domAnalyzer && window.domAnalyzer.cachedPathHashes) {
-      // Check for autocomplete first
-      if (window.domAnalyzer.hasAutocompleteAppeared()) {
-        console.log('🎯 SEQUENCE BREAK: Autocomplete detected, stopping action');
+      // Check if DOM changed after previous input action
+      if (window.domAnalyzer.domChangedAfterInput) {
+        console.log('🚨 DOM changed after previous input - need reanalysis!');
+        window.domAnalyzer.domChangedAfterInput = false; // Reset flag
         return {
           success: false,
-          error: 'Autocomplete appeared, DOM changed - re-analyze needed',
+          error: 'DOM changed after input (autocomplete/suggestions appeared)',
           reanalysisNeeded: true,
-          action: action
+          action: action,
+          message: 'Autocomplete appeared'
         };
       }
       
-      // Check for DOM obstruction
+      // Single dynamic check for DOM obstruction (Chrome extension approach)
+      // This automatically catches autocomplete, new elements, etc.
       if (window.domAnalyzer.hasObstructionOccurred()) {
-        console.log('🚧 OBSTRUCTION: DETECTED - DOM changed, need reanalysis');
+        console.log('🚧 OBSTRUCTION: DETECTED - Something new appeared on the page');
         return {
           success: false,
-          error: 'DOM changed, re-analyze needed',
+          error: 'Something new appeared, DOM changed - re-analyze needed',
           reanalysisNeeded: true,
-          action: action
+          action: action,
+          message: 'Something new appeared'
         };
       }
       
-      console.log('🚧 OBSTRUCTION: NONE - Continuing with action');
+      console.log('🚧 OBSTRUCTION: NONE - DOM unchanged, continuing');
     } else {
       console.log('🔄 DOM analyzer not available or not initialized, skipping checks');
     }
   }
   
-  // Action implementations
+  // Action implementations - inputText is now async
   try {
     switch (action) {
       case 'clickElement':
         return clickElementByIndex(params.index);
       case 'inputText':
-        return inputTextToElement(params.index, params.text);
+        // Wait for the async inputText to complete
+        return await inputTextToElement(params.index, params.text);
       case 'scrollToPercent':
         return scrollToPercent(params.yPercent);
       case 'scrollToTop':
@@ -1230,7 +1465,7 @@ function performBrowserAction(action, params) {
       action: action
     };
   }
-}
+};
 
 // Click element by index
 function clickElementByIndex(index) {
@@ -1341,16 +1576,57 @@ function inputTextToElement(index, text) {
   
   console.log(`✅ Successfully input text: "${text}"`);
   
-  return {
-    success: true,
-    message: `Input "${text}" into element at index ${index} (${element.tagName})`,
-    element: {
-      tagName: element.tagName,
-      type: element.type || 'contenteditable',
-      id: element.id || '',
-      className: element.className || ''
-    }
-  };
+  // Store initial DOM state before waiting - count interactive elements
+  const initialElementCount = window.domAnalyzer ? Object.keys(window.domAnalyzer.currentElementMap).length : 0;
+  console.log(`📊 Initial interactive element count: ${initialElementCount}`);
+  
+  // Return a promise that resolves after checking for DOM changes
+  // This ensures we wait for DOM changes before proceeding
+  return new Promise((resolve) => {
+    // Wait for DOM to update (autocomplete, etc.) then check for changes
+    setTimeout(() => {
+      console.log('⏱️ Checking for DOM changes after input...');
+      
+      let domChanged = false;
+      
+      if (window.domAnalyzer) {
+        // Re-analyze the DOM to get current state
+        const currentState = window.domAnalyzer.visualize();
+        const newElementCount = currentState.totalElements;
+        
+        console.log(`📊 New interactive element count: ${newElementCount}`);
+        console.log(`📊 Element count difference: ${newElementCount - initialElementCount}`);
+        
+        // If more interactive elements appeared, DOM changed (autocomplete)
+        if (newElementCount > initialElementCount) {
+          console.log('🚨 DOM CHANGED after input! New interactive elements appeared');
+          console.log(`🔄 ${newElementCount - initialElementCount} new elements detected (likely autocomplete)`);
+          domChanged = true;
+          
+          // Mark that DOM has changed so next action will know to reanalyze
+          window.domAnalyzer.domChangedAfterInput = true;
+        } else {
+          console.log('✅ DOM stable after input - no new interactive elements');
+          window.domAnalyzer.domChangedAfterInput = false;
+        }
+      }
+      
+      // Resolve with the result including DOM change status
+      resolve({
+        success: true,
+        message: `Input "${text}" into element at index ${index} (${element.tagName})`,
+        element: {
+          tagName: element.tagName,
+          type: element.type || 'contenteditable',
+          id: element.id || '',
+          className: element.className || ''
+        },
+        // Include DOM change status in the response
+        domChangedAfterInput: domChanged,
+        checkForDomChanges: true
+      });
+    }, 700); // Wait 700ms for autocomplete to appear (slightly longer for safety)
+  });
 }
 
 // Scroll functions
@@ -1525,5 +1801,46 @@ function selectDropdownOption(index, optionText) {
     message: `Selected option "${optionText}" from dropdown at index ${index}`
   };
 }
+
+// Listen for messages from background script
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  console.log('📨 Content script received message:', message.type);
+  
+  switch (message.type) {
+    case 'clear_dom_cache':
+      console.log('🧹 Clearing DOM cache due to:', message.reason);
+      console.log('🕐 Cache clear at:', new Date().toISOString());
+      console.log('🌐 Current URL:', window.location.href);
+      
+      if (window.domAnalyzer) {
+        console.log('📊 Elements before clear:', Object.keys(window.domAnalyzer.currentElementMap).length);
+        
+        if (message.reason === 'navigation') {
+          window.domAnalyzer.handleNavigation(window.location.href);
+        } else {
+          window.domAnalyzer.cleanup();
+          window.domAnalyzer.init();
+          window.domAnalyzer.cachedPathHashes = null;
+          window.domAnalyzer.domChangedAfterInput = false;
+        }
+        
+        console.log('📊 Elements after clear:', Object.keys(window.domAnalyzer.currentElementMap).length);
+      }
+      sendResponse({ success: true });
+      break;
+      
+    case 'check_ready':
+      sendResponse({ 
+        ready: true, 
+        hasAnalyzer: !!window.domAnalyzer 
+      });
+      break;
+      
+    default:
+      console.log('Unknown message type:', message.type);
+  }
+  
+  return true; // Keep message channel open for async response
+});
 
 console.log('✅ Visual Agent content script fully loaded with DOM analyzer and actions');

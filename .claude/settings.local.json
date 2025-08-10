@@ -40,7 +40,8 @@
       "Bash(swift test-websocket-frames.swift:*)",
       "Bash(ps:*)",
       "WebFetch(domain:developer.chrome.com)",
-      "WebFetch(domain:github.com)"
+      "WebFetch(domain:github.com)",
+      "Bash(npm run:*)"
     ],
     "deny": []
   }

@@ -285,6 +285,36 @@ class ExtensionConnectionManager: ObservableObject {
                     self?.handleBrowserActionReanalysis(data)
                 }
                 
+            case "page_navigation":
+                print("🔄 Page navigation detected")
+                if let data = message["data"] as? [String: Any] {
+                    self?.handlePageNavigation(data)
+                }
+                
+            case "navigation_complete":
+                print("🏁 Navigation completed")
+                if let data = message["data"] as? [String: Any] {
+                    self?.handleNavigationComplete(data)
+                }
+                
+            case "spa_navigation":
+                print("📜 SPA navigation detected")
+                if let data = message["data"] as? [String: Any] {
+                    self?.handleSPANavigation(data)
+                }
+                
+            case "page_ready":
+                print("✅ Page ready")
+                if let data = message["data"] as? [String: Any] {
+                    self?.handlePageReady(data)
+                }
+                
+            case "scroll_dom_changed":
+                print("📜 Scroll-based DOM changes detected")
+                if let data = message["data"] as? [String: Any] {
+                    self?.handleScrollDOMChanged(data)
+                }
+                
             default:
                 // Check for registered handlers
                 if let handler = self?.messageHandlers[messageType] {
@@ -627,6 +657,105 @@ class ExtensionConnectionManager: ObservableObject {
             name: Notification.Name("BrowserActionResponse"),
             object: nil,
             userInfo: reanalysisData
+        )
+    }
+    
+    private func handlePageNavigation(_ data: [String: Any]) {
+        print("🔄 Processing page navigation")
+        print("📍 New URL: \(data["url"] ?? "Unknown")")
+        
+        var navigationData = data
+        navigationData["reanalysisNeeded"] = true
+        navigationData["reason"] = "page_navigation"
+        
+        // Post notification for navigation event
+        NotificationCenter.default.post(
+            name: Notification.Name("PageNavigationDetected"),
+            object: nil,
+            userInfo: navigationData
+        )
+        
+        // Also trigger reanalysis
+        NotificationCenter.default.post(
+            name: Notification.Name("DOMReanalysisNeeded"),
+            object: nil,
+            userInfo: navigationData
+        )
+    }
+    
+    private func handleNavigationComplete(_ data: [String: Any]) {
+        print("🏁 Processing navigation complete")
+        print("📍 Final URL: \(data["url"] ?? "Unknown")")
+        
+        var completeData = data
+        completeData["reanalysisNeeded"] = true
+        completeData["reason"] = "navigation_complete"
+        
+        // Post notification for navigation complete
+        NotificationCenter.default.post(
+            name: Notification.Name("NavigationCompleted"),
+            object: nil,
+            userInfo: completeData
+        )
+    }
+    
+    private func handleSPANavigation(_ data: [String: Any]) {
+        print("📜 Processing SPA navigation")
+        print("📍 SPA URL: \(data["url"] ?? "Unknown")")
+        
+        var spaData = data
+        spaData["reanalysisNeeded"] = true
+        spaData["reason"] = "spa_navigation"
+        
+        // Post notification for SPA navigation
+        NotificationCenter.default.post(
+            name: Notification.Name("SPANavigationDetected"),
+            object: nil,
+            userInfo: spaData
+        )
+        
+        // Also trigger reanalysis for SPA changes
+        NotificationCenter.default.post(
+            name: Notification.Name("DOMReanalysisNeeded"),
+            object: nil,
+            userInfo: spaData
+        )
+    }
+    
+    private func handlePageReady(_ data: [String: Any]) {
+        print("✅ Processing page ready")
+        print("📍 Ready URL: \(data["url"] ?? "Unknown")")
+        
+        // Post notification for page ready
+        NotificationCenter.default.post(
+            name: Notification.Name("PageReadyDetected"),
+            object: nil,
+            userInfo: data
+        )
+    }
+    
+    private func handleScrollDOMChanged(_ data: [String: Any]) {
+        print("📜 Processing scroll-based DOM changes")
+        print("📊 Element delta: \(data["elementDelta"] ?? 0)")
+        print("📊 Scroll delta: \(data["scrollDelta"] ?? 0)px")
+        print("📊 Height delta: \(data["heightDelta"] ?? 0)px")
+        
+        var scrollData = data
+        scrollData["reanalysisNeeded"] = true
+        scrollData["reason"] = "scroll_dom_changed"
+        
+        // Post notification for scroll-based DOM changes
+        NotificationCenter.default.post(
+            name: Notification.Name("ScrollDOMChangesDetected"),
+            object: nil,
+            userInfo: scrollData
+        )
+        
+        // Also trigger reanalysis as new elements appeared
+        NotificationCenter.default.post(
+            name: Notification.Name("DOMReanalysisNeeded"),
+            object: nil,
+            userInfo: scrollData
         )
     }
     

@@ -316,15 +316,49 @@ async function executeBrowserAction(data) {
     
     console.log(`⚡ Executing action: ${action} with index: ${index}`);
     
-    // Execute the action directly via content script (no injection needed)
+    // Execute the action via the content script's performBrowserAction
+    // This ensures it has access to window.domAnalyzer
     const result = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
-      func: performBrowserAction,
+      func: async (action, params) => {
+        // Call the content script's performBrowserAction directly
+        // This has access to the persistent window.domAnalyzer
+        if (typeof window.performBrowserAction === 'function') {
+          return await window.performBrowserAction(action, params);
+        } else {
+          throw new Error('performBrowserAction not found in content script');
+        }
+      },
       args: [action, { index, text, url, seconds, keys, yPercent }]
     });
     
     const actionResult = result[0]?.result;
     console.log('⚡ Browser action completed:', actionResult);
+    
+    // Check if DOM changed after input action
+    if (actionResult?.domChangedAfterInput) {
+      console.log('🚨 DOM changed after input action, signaling reanalysis needed');
+      console.log('🔄 Sending reanalysis signal to Mac app');
+      
+      // Send reanalysis needed message immediately
+      sendMessage({
+        type: 'browser_action_reanalysis_needed',
+        data: {
+          success: false,
+          action: action,
+          error: 'DOM changed after input (autocomplete/suggestions appeared)',
+          reanalysisNeeded: true,
+          domChangedAfterInput: true,
+          timestamp: Date.now(),
+          tabInfo: {
+            url: tab.url,
+            title: tab.title,
+            tabId: tab.id
+          }
+        }
+      });
+      return; // Exit early to prevent sending success message
+    }
     
     // Check if reanalysis is needed (from Chrome extension pattern)
     if (actionResult?.reanalysisNeeded) {
@@ -380,42 +414,33 @@ async function executeBrowserAction(data) {
 }
 
 // This function will be injected into the page context to perform browser actions
-function performBrowserAction(action, params) {
+async function performBrowserAction(action, params) {
   console.log(`⚡ Performing browser action: ${action}`, params);
   
   // Check if this is an indexed action (requires reanalysis)
   const indexedActions = ['clickElement', 'inputText', 'getDropdownOptions', 'selectDropdownOption'];
   const isIndexedAction = indexedActions.includes(action) && params.index !== undefined;
   
-  // DOM reanalysis logic (copied from Chrome extension)
+  // DOM reanalysis logic - EXACT COPY from Chrome extension (dynamic approach)
   if (isIndexedAction) {
     console.log('🔄 Indexed action detected, checking DOM state...');
     
     // Only check if DOM analyzer is available and has been run
     if (window.domAnalyzer && window.domAnalyzer.cachedPathHashes) {
-      // Check for autocomplete first
-      if (window.domAnalyzer.hasAutocompleteAppeared()) {
-        console.log('🎯 SEQUENCE BREAK: Autocomplete detected, stopping action');
-        return {
-          success: false,
-          error: 'Autocomplete appeared, DOM changed - re-analyze needed',
-          reanalysisNeeded: true,
-          action: action
-        };
-      }
-      
-      // Check for DOM obstruction
+      // Single dynamic check for DOM obstruction (Chrome extension approach)
+      // This automatically catches autocomplete, new elements, etc.
       if (window.domAnalyzer.hasObstructionOccurred()) {
-        console.log('🚧 OBSTRUCTION: DETECTED - DOM changed, need reanalysis');
+        console.log('🚧 OBSTRUCTION: DETECTED - Something new appeared on the page');
         return {
           success: false,
-          error: 'DOM changed, re-analyze needed',
+          error: 'Something new appeared, DOM changed - re-analyze needed',
           reanalysisNeeded: true,
-          action: action
+          action: action,
+          message: 'Something new appeared'
         };
       }
       
-      console.log('🚧 OBSTRUCTION: NONE - Continuing with action');
+      console.log('🚧 OBSTRUCTION: NONE - DOM unchanged, continuing');
     } else {
       console.log('🔄 DOM analyzer not available or not initialized, skipping checks');
     }
@@ -480,68 +505,16 @@ function performBrowserAction(action, params) {
     };
   }
 
-  // Input text to element
-  function inputTextToElement(index, text) {
+  // Input text to element - this is a stub for the injected version
+  // The actual implementation with DOM change detection is in content.js
+  async function inputTextToElement(index, text) {
     console.log(`⌨️ Attempting to input text "${text}" into element with index: ${index}`);
     
-    if (!text) {
-      throw new Error('No text provided for input');
-    }
+    // This function is injected and doesn't have the full implementation
+    // It's just here to match the signature. The real implementation is in content.js
+    // which has access to window.domAnalyzer
     
-    if (!window.domAnalyzer) {
-      throw new Error('DOM analyzer not available. Run visualization first.');
-    }
-    
-    const element = window.domAnalyzer.getElementByIndex(index);
-    console.log(`🔍 Found element for index ${index}:`, element);
-    
-    if (!element) {
-      throw new Error(`No element found with index ${index}. Available indices: ${Object.keys(window.domAnalyzer.getCachedElementMap()).join(', ')}`);
-    }
-    
-    if (!document.contains(element)) {
-      throw new Error(`Element at index ${index} is no longer in the DOM`);
-    }
-    
-    const isValidInput = element instanceof HTMLInputElement || 
-                        element instanceof HTMLTextAreaElement ||
-                        element.isContentEditable ||
-                        element.getAttribute('contenteditable') === 'true';
-    
-    if (!isValidInput) {
-      throw new Error(`Element at index ${index} (${element.tagName}) is not a valid input field`);
-    }
-    
-    console.log(`📝 Inputting text into ${element.tagName} element`);
-    
-    element.focus();
-    
-    if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
-      element.select();
-      element.value = text;
-      element.dispatchEvent(new Event('focus', { bubbles: true }));
-      element.dispatchEvent(new Event('input', { bubbles: true }));
-      element.dispatchEvent(new Event('change', { bubbles: true }));
-      element.dispatchEvent(new Event('blur', { bubbles: true }));
-    } else if (element.isContentEditable || element.getAttribute('contenteditable') === 'true') {
-      element.innerHTML = text;
-      element.dispatchEvent(new Event('focus', { bubbles: true }));
-      element.dispatchEvent(new Event('input', { bubbles: true }));
-      element.dispatchEvent(new Event('blur', { bubbles: true }));
-    }
-    
-    console.log(`✅ Successfully input text: "${text}"`);
-    
-    return {
-      success: true,
-      message: `Input "${text}" into element at index ${index} (${element.tagName})`,
-      element: {
-        tagName: element.tagName,
-        type: element.type || 'contenteditable',
-        id: element.id || '',
-        className: element.className || ''
-      }
-    };
+    throw new Error('This function should not be called directly. Use content.js implementation.');
   }
 
   // Scroll functions
@@ -723,7 +696,9 @@ function performBrowserAction(action, params) {
       case 'clickElement':
         return clickElementByIndex(params.index);
       case 'inputText':
-        return inputTextToElement(params.index, params.text);
+        // Note: inputText is now async in content.js, but this is a duplicate
+        // The actual implementation is in content.js
+        return await inputTextToElement(params.index, params.text);
       case 'scrollToPercent':
         return scrollToPercent(params.yPercent);
       case 'scrollToTop':
@@ -1039,7 +1014,7 @@ function sendMessage(message) {
   }
 }
 
-// Check connection status (for popup)
+// Check connection status (for popup) and handle scroll events from content script
 chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
   if (request.type === 'get_status') {
     sendResponse({ 
@@ -1047,6 +1022,21 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
       currentTaskId: currentTaskId,
       timestamp: Date.now()
     });
+  } else if (request.type === 'scroll_dom_changed') {
+    console.log('📜 Content script detected scroll-based DOM changes');
+    console.log('📊 Scroll data:', request.data);
+    
+    // Send scroll DOM change event to Mac app
+    sendMessage({
+      type: 'scroll_dom_changed',
+      data: {
+        ...request.data,
+        reanalysisNeeded: true,
+        message: `${request.data.elementDelta} new elements appeared after scrolling`
+      }
+    });
+    
+    sendResponse({ success: true });
   }
 });
 
@@ -1060,6 +1050,146 @@ function checkDownloadSettings() {
   console.log('');
   console.log('⚠️  Without this setting, Chrome will show a save dialog for each screenshot');
 }
+
+// Listen for tab updates (navigation, redirects, etc.)
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  // Skip if websocket is not connected yet
+  if (!isConnected) {
+    console.log('⏳ Tab event ignored - WebSocket not connected yet');
+    return;
+  }
+  
+  // Check if the URL has changed (navigation/redirect)
+  if (changeInfo.url) {
+    console.log('🔄 Tab navigation detected:', changeInfo.url);
+    
+    // Send navigation event to Mac app
+    sendMessage({
+      type: 'page_navigation',
+      data: {
+        tabId: tabId,
+        url: changeInfo.url,
+        title: tab.title || '',
+        timestamp: Date.now(),
+        message: 'Page navigated - DOM reanalysis needed'
+      }
+    });
+    
+    // Only clear cache for significant URL changes, not minor SPA navigation
+    let isSignificantChange = false;
+    try {
+      if (changeInfo.url && tab.url) {
+        const newUrl = new URL(changeInfo.url);
+        const oldUrl = new URL(tab.url);
+        isSignificantChange = (
+          newUrl.hostname !== oldUrl.hostname ||
+          newUrl.pathname !== oldUrl.pathname
+        );
+      } else if (changeInfo.url && !tab.url) {
+        isSignificantChange = true; // First navigation
+      }
+    } catch (error) {
+      console.log('URL parsing error:', error);
+      isSignificantChange = false;
+    }
+    
+    if (isSignificantChange) {
+      console.log('🔄 Significant navigation - clearing DOM cache');
+      // Clear any cached DOM state in content script
+      chrome.tabs.sendMessage(tabId, { 
+        type: 'clear_dom_cache',
+        reason: 'navigation'
+      }).catch(() => {
+        // Content script might not be injected yet on new page
+        console.log('Content script not ready on new page yet');
+      });
+    } else {
+      console.log('🔄 Minor navigation - keeping DOM cache');
+    }
+  }
+  
+  // Check if page loading is complete
+  if (changeInfo.status === 'complete') {
+    console.log('✅ Page load complete:', tab.url);
+    
+    // Important: Don't re-inject content script on navigation as it's already persistent
+    // Re-injection would lose the DOM analyzer state
+    
+    // Send page ready event
+    sendMessage({
+      type: 'page_ready',
+      data: {
+        tabId: tabId,
+        url: tab.url,
+        title: tab.title || '',
+        timestamp: Date.now()
+      }
+    });
+  }
+});
+
+// Listen for navigation completion using webNavigation API for better accuracy
+chrome.webNavigation.onCompleted.addListener((details) => {
+  // Skip if websocket is not connected yet
+  if (!isConnected) {
+    return;
+  }
+  
+  if (details.frameId === 0) { // Main frame only
+    console.log('🏁 Navigation completed:', details.url);
+    
+    // Send navigation complete event
+    sendMessage({
+      type: 'navigation_complete',
+      data: {
+        tabId: details.tabId,
+        url: details.url,
+        timestamp: Date.now(),
+        reanalysisNeeded: true
+      }
+    });
+  }
+});
+
+// Listen for history state updates (single-page apps) - but be less aggressive
+chrome.webNavigation.onHistoryStateUpdated.addListener((details) => {
+  // Skip if websocket is not connected yet
+  if (!isConnected) {
+    return;
+  }
+  
+  if (details.frameId === 0) { // Main frame only
+    console.log('📜 History state updated (SPA navigation):', details.url);
+    
+    // Only send SPA navigation events for significant changes
+    // Google search query parameter changes shouldn't clear the DOM cache
+    let isSearchParamChange = false;
+    try {
+      const urlObj = new URL(details.url);
+      isSearchParamChange = urlObj.hostname.includes('google.') && 
+                            urlObj.pathname === '/search';
+    } catch (error) {
+      console.log('URL parsing error in SPA navigation:', error);
+      isSearchParamChange = false;
+    }
+    
+    if (!isSearchParamChange) {
+      // Send SPA navigation event for non-search parameter changes
+      sendMessage({
+        type: 'spa_navigation',
+        data: {
+          tabId: details.tabId,
+          url: details.url,
+          timestamp: Date.now(),
+          reanalysisNeeded: true,
+          message: 'Single-page app navigation detected'
+        }
+      });
+    } else {
+      console.log('📜 Ignoring Google search parameter change - not clearing cache');
+    }
+  }
+});
 
 // Start connection when extension loads
 console.log('🚀 Visual Agent background script starting...');
