@@ -316,24 +316,24 @@ async function executeBrowserAction(data) {
       throw new Error('No active tab found');
     }
     
-    const { action, index, text, url, seconds, keys, yPercent } = data;
+    const { action, index, text, url, seconds, keys, yPercent, time, amount } = data;
     
-    console.log(`⚡ Executing action: ${action} with index: ${index}`);
+    console.log(`⚡ Executing action: ${action} with params:`, { index, text, url, seconds, keys, yPercent, time, amount });
     
     // Execute the action via the content script's performBrowserAction
-    // This ensures it has access to window.domAnalyzer
+    // This ensures it has access to window.domAnalyzer and video handlers
     const result = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       func: async (action, params) => {
         // Call the content script's performBrowserAction directly
-        // This has access to the persistent window.domAnalyzer
+        // This has access to the persistent window.domAnalyzer and video handlers
         if (typeof window.performBrowserAction === 'function') {
           return await window.performBrowserAction(action, params);
         } else {
           throw new Error('performBrowserAction not found in content script');
         }
       },
-      args: [action, { index, text, url, seconds, keys, yPercent }]
+      args: [action, { index, text, url, seconds, keys, yPercent, time, amount }]
     });
     
     const actionResult = result[0]?.result;

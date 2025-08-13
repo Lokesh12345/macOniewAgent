@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Iframe DOM Analysis Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            line-height: 1.6;
+        }
+        
+        .iframe-container {
+            border: 2px solid #ddd;
+            margin: 20px 0;
+            padding: 10px;
+            border-radius: 8px;
+        }
+        
+        iframe {
+            width: 100%;
+            height: 300px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        
+        .same-origin-iframe {
+            background: #f0f8ff;
+        }
+        
+        .test-controls {
+            background: #f5f5f5;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+        
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        
+        button:hover {
+            background: #0056b3;
+        }
+        
+        .results {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 15px;
+            margin: 20px 0;
+            font-family: monospace;
+            white-space: pre-wrap;
+        }
+    </style>
+</head>
+<body>
+    <h1>Iframe DOM Analysis Test</h1>
+    <p>This page tests the enhanced iframe handling in the DOM analyzer.</p>
+    
+    <div class="test-controls">
+        <h3>Test Controls</h3>
+        <button onclick="runDOMAnalysis()">Run DOM Analysis</button>
+        <button onclick="clearHighlights()">Clear Highlights</button>
+        <button onclick="createDynamicIframe()">Add Dynamic Iframe</button>
+    </div>
+    
+    <div class="iframe-container same-origin-iframe">
+        <h3>Same-Origin Iframe (accessible content)</h3>
+        <iframe id="same-origin-frame" srcdoc="
+            <!DOCTYPE html>
+            <html>
+            <head><title>Same Origin Frame</title></head>
+            <body style='padding: 20px; font-family: Arial;'>
+                <h2>Content Inside Iframe</h2>
+                <button onclick='alert(\"Button inside iframe clicked!\")'>Click Me</button>
+                <p>This is a paragraph inside the iframe.</p>
+                <a href='#'>Link inside iframe</a>
+                <input type='text' placeholder='Text input in iframe' />
+                <div style='background: #ffffcc; padding: 10px; margin: 10px 0; border: 1px solid #ddd;'>
+                    <p>Interactive div with content</p>
+                    <select>
+                        <option>Option 1</option>
+                        <option>Option 2</option>
+                    </select>
+                </div>
+            </body>
+            </html>
+        "></iframe>
+    </div>
+    
+    <div class="iframe-container">
+        <h3>Cross-Origin Iframe (YouTube - restricted access)</h3>
+        <iframe src="https://www.youtube.com/embed/dQw4w9WgXcQ?si=abc123def456" 
+                title="YouTube video player" 
+                frameborder="0" 
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" 
+                referrerpolicy="strict-origin-when-cross-origin" 
+                allowfullscreen></iframe>
+    </div>
+    
+    <div class="iframe-container">
+        <h3>Main Page Interactive Elements</h3>
+        <button onclick="alert('Main page button clicked!')">Main Page Button</button>
+        <input type="text" placeholder="Main page input" />
+        <select>
+            <option>Main page option 1</option>
+            <option>Main page option 2</option>
+        </select>
+        <a href="#test">Main page link</a>
+    </div>
+    
+    <div class="results" id="results">
+        Results will appear here...
+    </div>
+    
+    <script src="/Users/lokesh/Desktop/projects/mac/Oniew Agent/visual-agent/extension/src/content.js"></script>
+    <script>
+        function runDOMAnalysis() {
+            console.log('🚀 Starting DOM Analysis Test');
+            const results = document.getElementById('results');
+            results.textContent = 'Running DOM analysis...\n';
+            
+            try {
+                // Use the enhanced DOM analyzer
+                if (window.domAnalyzer) {
+                    const analysisResult = window.domAnalyzer.visualize();
+                    
+                    results.textContent += `Analysis completed!\n`;
+                    results.textContent += `Total elements found: ${analysisResult.totalElements}\n`;
+                    results.textContent += `Check console for detailed iframe statistics\n`;
+                    results.textContent += `Look for highlighted elements on the page\n`;
+                    
+                    // Log detailed results
+                    console.log('Analysis Result:', analysisResult);
+                } else {
+                    results.textContent += 'Error: DOM analyzer not found\n';
+                }
+            } catch (error) {
+                results.textContent += `Error: ${error.message}\n`;
+                console.error('DOM Analysis Error:', error);
+            }
+        }
+        
+        function clearHighlights() {
+            // Remove all highlight containers
+            const containers = document.querySelectorAll('[id*="playwright-highlight"]');
+            containers.forEach(container => container.remove());
+            
+            // Also try to clear iframe highlights
+            const iframes = document.querySelectorAll('iframe');
+            iframes.forEach(iframe => {
+                try {
+                    const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+                    if (iframeDoc) {
+                        const iframeContainers = iframeDoc.querySelectorAll('[id*="playwright-highlight"]');
+                        iframeContainers.forEach(container => container.remove());
+                    }
+                } catch (e) {
+                    // Cross-origin iframe, ignore
+                }
+            });
+            
+            document.getElementById('results').textContent = 'Highlights cleared\n';
+        }
+        
+        function createDynamicIframe() {
+            const container = document.createElement('div');
+            container.className = 'iframe-container';
+            container.innerHTML = `
+                <h3>Dynamic Iframe (created via JavaScript)</h3>
+                <iframe srcdoc="
+                    <!DOCTYPE html>
+                    <html>
+                    <body style='padding: 20px;'>
+                        <h3>Dynamic Content</h3>
+                        <button onclick='alert(\"Dynamic iframe button!\")'>Dynamic Button</button>
+                        <textarea placeholder='Dynamic textarea'></textarea>
+                    </body>
+                    </html>
+                "></iframe>
+            `;
+            
+            document.body.appendChild(container);
+            document.getElementById('results').textContent += 'Dynamic iframe added\n';
+        }
+        
+        // Auto-run test on page load
+        window.addEventListener('load', () => {
+            setTimeout(() => {
+                document.getElementById('results').textContent = 'Page loaded. Click "Run DOM Analysis" to test iframe handling.\n';
+            }, 1000);
+        });
+    </script>
+</body>
+</html>

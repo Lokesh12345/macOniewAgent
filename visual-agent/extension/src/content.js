@@ -191,10 +191,37 @@ window.buildDomTree = (
       const baseColor = colors[colorIndex];
       const backgroundColor = baseColor + '1A'; // 10% opacity version of the color
 
-      // Get iframe offset if necessary
+      // Calculate cumulative iframe offset for nested iframes
       let iframeOffset = { x: 0, y: 0 };
-      if (parentIframe) {
-        const iframeRect = parentIframe.getBoundingClientRect(); // Keep getBoundingClientRect for iframe offset
+      
+      // If element is inside an iframe, calculate the offset from the main document
+      if (element.ownerDocument !== document) {
+        // Find all iframe ancestors up to the main document
+        let currentDoc = element.ownerDocument;
+        while (currentDoc && currentDoc !== document) {
+          // Find the iframe element that contains this document
+          const iframes = Array.from(document.querySelectorAll('iframe'));
+          const containingIframe = iframes.find(iframe => {
+            try {
+              return iframe.contentDocument === currentDoc || iframe.contentWindow?.document === currentDoc;
+            } catch (e) {
+              return false;
+            }
+          });
+          
+          if (containingIframe) {
+            const iframeRect = containingIframe.getBoundingClientRect();
+            iframeOffset.x += iframeRect.left;
+            iframeOffset.y += iframeRect.top;
+            // Move up to the parent document
+            currentDoc = containingIframe.ownerDocument;
+          } else {
+            break;
+          }
+        }
+      } else if (parentIframe) {
+        // Legacy support for parentIframe parameter
+        const iframeRect = parentIframe.getBoundingClientRect();
         iframeOffset.x = iframeRect.left;
         iframeOffset.y = iframeRect.top;
       }
@@ -208,10 +235,58 @@ window.buildDomTree = (
 
         const overlay = document.createElement('div');
         overlay.style.position = 'fixed';
-        overlay.style.border = `2px solid ${baseColor}`;
-        overlay.style.backgroundColor = backgroundColor;
         overlay.style.pointerEvents = 'none';
         overlay.style.boxSizing = 'border-box';
+        
+        // Special styling for iframe elements
+        if (element.tagName.toLowerCase() === 'iframe') {
+          try {
+            const iframeDoc = element.contentDocument || element.contentWindow?.document;
+            const isAccessible = !!(iframeDoc && iframeDoc.body);
+            
+            if (isAccessible) {
+              // Accessible iframe - green dashed border
+              overlay.style.border = `3px dashed #28a745`;
+              overlay.style.backgroundColor = '#28a745' + '0D'; // 5% green opacity
+              overlay.style.borderRadius = '6px';
+              overlay.style.backgroundImage = `repeating-linear-gradient(45deg, transparent, transparent 4px, #28a74508 4px, #28a74508 8px)`;
+            } else {
+              // Cross-origin iframe - red dashed border with warning pattern
+              overlay.style.border = `3px dashed #dc3545`;
+              overlay.style.backgroundColor = '#dc3545' + '0D'; // 5% red opacity  
+              overlay.style.borderRadius = '6px';
+              overlay.style.backgroundImage = `repeating-linear-gradient(45deg, transparent, transparent 6px, #dc354508 6px, #dc354508 12px)`;
+              
+              // Add small warning icon overlay
+              const warningIcon = document.createElement('div');
+              warningIcon.style.position = 'absolute';
+              warningIcon.style.top = '4px';
+              warningIcon.style.right = '4px';
+              warningIcon.style.width = '20px';
+              warningIcon.style.height = '20px';
+              warningIcon.style.backgroundColor = '#dc3545';
+              warningIcon.style.color = 'white';
+              warningIcon.style.borderRadius = '50%';
+              warningIcon.style.display = 'flex';
+              warningIcon.style.alignItems = 'center';
+              warningIcon.style.justifyContent = 'center';
+              warningIcon.style.fontSize = '12px';
+              warningIcon.style.fontWeight = 'bold';
+              warningIcon.textContent = '⚠';
+              warningIcon.style.zIndex = '2147483643';
+              overlay.appendChild(warningIcon);
+            }
+          } catch (e) {
+            // Error accessing iframe - treat as cross-origin
+            overlay.style.border = `3px dashed #dc3545`;
+            overlay.style.backgroundColor = '#dc3545' + '0D';
+            overlay.style.borderRadius = '6px';
+            overlay.style.backgroundImage = `repeating-linear-gradient(45deg, transparent, transparent 6px, #dc354508 6px, #dc354508 12px)`;
+          }
+        } else {
+          overlay.style.border = `2px solid ${baseColor}`;
+          overlay.style.backgroundColor = backgroundColor;
+        }
 
         const top = rect.top + iframeOffset.y;
         const left = rect.left + iframeOffset.x;
@@ -235,7 +310,32 @@ window.buildDomTree = (
       label.style.padding = '1px 4px';
       label.style.borderRadius = '4px';
       label.style.fontSize = `${Math.min(12, Math.max(8, firstRect.height / 2))}px`;
-      label.textContent = index;
+      
+      // Special label content for iframe elements
+      if (element.tagName.toLowerCase() === 'iframe') {
+        try {
+          const iframeDoc = element.contentDocument || element.contentWindow?.document;
+          const isAccessible = !!(iframeDoc && iframeDoc.body);
+          
+          if (isAccessible) {
+            label.textContent = `[${index}] ✓`;
+            label.style.backgroundColor = '#28a745';
+            label.style.border = `1px solid #1e7e34`;
+          } else {
+            label.textContent = `[${index}] ⚠`;
+            label.style.backgroundColor = '#dc3545';
+            label.style.border = `1px solid #bd2130`;
+          }
+        } catch (e) {
+          label.textContent = `[${index}] ⚠`;
+          label.style.backgroundColor = '#dc3545';
+          label.style.border = `1px solid #bd2130`;
+        }
+        label.style.fontWeight = 'bold';
+        label.style.fontSize = '10px';
+      } else {
+        label.textContent = index;
+      }
 
       labelWidth = label.offsetWidth > 0 ? label.offsetWidth : labelWidth; // Update actual width if possible
       labelHeight = label.offsetHeight > 0 ? label.offsetHeight : labelHeight; // Update actual height if possible
@@ -273,9 +373,23 @@ window.buildDomTree = (
 
   // Add this function to perform cleanup when needed
   function cleanupHighlights() {
-    // Remove the container
+    // Remove the container from main document
     const container = document.getElementById(HIGHLIGHT_CONTAINER_ID);
     if (container) container.remove();
+    
+    // Also clean up iframe containers
+    const iframes = document.querySelectorAll('iframe');
+    iframes.forEach(iframe => {
+      try {
+        const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+        if (iframeDoc) {
+          const iframeContainer = iframeDoc.getElementById(HIGHLIGHT_CONTAINER_ID + '_iframe');
+          if (iframeContainer) iframeContainer.remove();
+        }
+      } catch (e) {
+        // Ignore cross-origin errors
+      }
+    });
   }
 
   function getElementPosition(currentElement) {
@@ -953,16 +1067,38 @@ window.buildDomTree = (
 
       // Handle iframes
       if (tagName === 'iframe') {
+        // Always mark iframe elements as interactive so they get highlighted
+        nodeData.isInteractive = true;
+        nodeData.iframeSrc = node.src || node.getAttribute('src') || 'data:text/html';
+        
         try {
           const iframeDoc = node.contentDocument || node.contentWindow?.document;
-          if (iframeDoc) {
+          if (iframeDoc && iframeDoc.body) {
+            // Accessible iframe - traverse its content
+            nodeData.iframeAccessible = true;
+            nodeData.crossOrigin = false;
+            
+            console.log(`✅ Accessible iframe found: ${nodeData.iframeSrc}`);
+            
             for (const child of iframeDoc.childNodes) {
               const domElement = buildDomTree(child, node, false);
               if (domElement) nodeData.children.push(domElement);
             }
+          } else {
+            // Cross-origin iframe - mark as such but still make it interactive
+            nodeData.iframeAccessible = false;
+            nodeData.crossOrigin = true;
+            
+            console.log(`🚫 Cross-origin iframe detected: ${nodeData.iframeSrc}`);
+            
+            // Add a note about the cross-origin restriction
+            nodeData.crossOriginNote = 'Content not accessible due to cross-origin policy';
           }
         } catch (e) {
-          console.warn('Unable to access iframe:', e);
+          console.warn(`❌ Error accessing iframe ${nodeData.iframeSrc}:`, e.message);
+          nodeData.iframeAccessible = false;
+          nodeData.crossOrigin = true;
+          nodeData.crossOriginNote = `Access blocked: ${e.message}`;
         }
       }
       // Handle rich text editors and contenteditable elements
@@ -1037,6 +1173,45 @@ window.domAnalyzer = {
     console.log('🕐 Visualize called at:', new Date().toISOString());
     console.log('🌐 Current URL:', window.location.href);
     
+    // Count and report iframe statistics
+    const iframes = document.querySelectorAll('iframe');
+    const accessibleIframes = [];
+    const crossOriginIframes = [];
+    
+    iframes.forEach((iframe, index) => {
+      try {
+        const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+        if (iframeDoc) {
+          accessibleIframes.push({
+            index,
+            src: iframe.src,
+            origin: iframe.src ? new URL(iframe.src).origin : 'same-origin'
+          });
+        } else {
+          crossOriginIframes.push({
+            index,
+            src: iframe.src,
+            origin: iframe.src ? new URL(iframe.src).origin : 'unknown'
+          });
+        }
+      } catch (e) {
+        crossOriginIframes.push({
+          index,
+          src: iframe.src,
+          origin: iframe.src ? new URL(iframe.src).origin : 'unknown',
+          error: e.message
+        });
+      }
+    });
+    
+    console.log(`📦 Found ${iframes.length} iframes: ${accessibleIframes.length} accessible, ${crossOriginIframes.length} cross-origin`);
+    if (accessibleIframes.length > 0) {
+      console.log('✅ Accessible iframes:', accessibleIframes);
+    }
+    if (crossOriginIframes.length > 0) {
+      console.log('🚫 Cross-origin iframes:', crossOriginIframes);
+    }
+    
     // Use Chrome extension's buildDomTree with highlighting enabled
     const result = window.buildDomTree({
       showHighlightElements: true,
@@ -1101,6 +1276,9 @@ window.domAnalyzer = {
     // Start intelligent SPA monitoring to detect delayed content loading
     this.startSPAMonitoring();
     
+    // Start immediate dropdown interaction monitoring
+    this.startDropdownInteractionMonitoring();
+    
     return {
       totalElements: elementCount,
       elementMap: elementMap
@@ -1159,6 +1337,7 @@ window.domAnalyzer = {
     if (container) {
       container.remove();
     }
+    this.stopDropdownInteractionMonitoring();
   },
   
   // Navigation handling - clear state when page changes
@@ -1369,6 +1548,9 @@ window.domAnalyzer = {
       clearInterval(engine.checkIntervalId);
       engine.checkIntervalId = null;
     }
+    
+    // Also stop dropdown monitoring
+    this.stopDropdownInteractionMonitoring();
   },
   
   // Monitor DOM mutations with rate calculation
@@ -1382,16 +1564,58 @@ window.domAnalyzer = {
       
       // Check for significant content additions
       let significantAdditions = 0;
+      let hasDropdownContent = false;
+      
       mutations.forEach(mutation => {
         if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
           mutation.addedNodes.forEach(node => {
             if (node.nodeType === Node.ELEMENT_NODE) {
+              // Enhanced detection for dropdown/menu content
+              const tagName = node.tagName?.toLowerCase() || '';
+              const className = node.className?.toLowerCase() || '';
+              const role = node.getAttribute?.('role')?.toLowerCase() || '';
+              
+              // Check for dynamic content patterns (generic approach)
+              const isDynamicContent = 
+                // Common dynamic UI patterns
+                className.includes('dropdown') ||
+                className.includes('menu') ||
+                className.includes('popover') ||
+                className.includes('tooltip') ||
+                className.includes('overlay') ||
+                className.includes('modal') ||
+                className.includes('popup') ||
+                
+                // Semantic roles that indicate dynamic content
+                role.includes('menu') ||
+                role.includes('listbox') ||
+                role.includes('combobox') ||
+                role.includes('dialog') ||
+                
+                // Structural patterns that suggest dynamic content
+                tagName === 'ul' && node.children?.length > 2 ||
+                tagName === 'nav' ||
+                tagName === 'aside' && node.children?.length > 1 ||
+                
+                // Container patterns with multiple children (likely dynamic lists/menus)
+                node.children?.length > 3 && (
+                  className.includes('nav') || 
+                  className.includes('list') ||
+                  className.includes('items')
+                );
+              
               // Check if it's a significant container (has children or specific patterns)
               const isSignificant = node.children?.length > 2 || 
                                    node.classList?.length > 0 ||
-                                   node.tagName?.toLowerCase() === 'section' ||
-                                   node.tagName?.toLowerCase() === 'article' ||
-                                   node.tagName?.toLowerCase() === 'aside';
+                                   tagName === 'section' ||
+                                   tagName === 'article' ||
+                                   tagName === 'aside' ||
+                                   isDynamicContent;
+              
+              if (isDynamicContent) {
+                hasDropdownContent = true;
+                console.log('🧠 Dynamic content detected:', tagName, className);
+              }
               
               if (isSignificant) {
                 significantAdditions++;
@@ -1399,7 +1623,38 @@ window.domAnalyzer = {
             }
           });
         }
+        
+        // Also check for style/visibility changes that might reveal content
+        if (mutation.type === 'attributes' && mutation.attributeName === 'style') {
+          const element = mutation.target;
+          if (element.nodeType === Node.ELEMENT_NODE) {
+            const style = element.style;
+            const className = element.className?.toLowerCase() || '';
+            
+            // Check if something was made visible (dynamic content behavior)
+            if ((style.display !== 'none' && style.visibility !== 'hidden')) {
+              // Check if this element or its children suggest dynamic content
+              const hasMultipleChildren = element.children?.length > 2;
+              const hasDynamicClasses = className.includes('dropdown') || 
+                                      className.includes('menu') || 
+                                      className.includes('popup') ||
+                                      className.includes('modal');
+              
+              if (hasMultipleChildren || hasDynamicClasses) {
+                hasDropdownContent = true;
+                console.log('🧠 Element visibility changed (dynamic content):', element.tagName, className);
+              }
+            }
+          }
+        }
       });
+      
+      // For any significant content, reduce the stability threshold for faster response
+      if (hasDropdownContent || significantAdditions >= engine.config.significantElementThreshold) {
+        engine.config.stabilityThreshold = 150; // 150ms for dynamic content
+        engine.signals.significantContentAdded = true;
+        console.log('🧠 Dynamic content detected - reducing stability threshold to 150ms');
+      }
       
       if (significantAdditions >= engine.config.significantElementThreshold) {
         engine.signals.significantContentAdded = true;
@@ -1407,11 +1662,12 @@ window.domAnalyzer = {
       }
     });
     
-    // Observe entire document but with optimizations
+    // Observe entire document with enhanced dropdown detection
     engine.mutationObserver.observe(document.body, {
       childList: true,
       subtree: true,
-      attributes: false, // Skip attribute changes for performance
+      attributes: true, // Watch for style/class changes (dropdowns)
+      attributeFilter: ['style', 'class', 'aria-expanded', 'aria-hidden'], // Only specific attributes
       characterData: false // Skip text changes for performance
     });
   },
@@ -1662,6 +1918,122 @@ window.domAnalyzer = {
     }
     
     return `/${parts.join('/')}`;
+  },
+  
+  // Immediate dropdown interaction monitoring - for instant response to menu clicks
+  dropdownInteractionState: {
+    isActive: false,
+    clickListener: null,
+    reanalysisTimeout: null
+  },
+  
+  startDropdownInteractionMonitoring() {
+    if (this.dropdownInteractionState.isActive) {
+      this.stopDropdownInteractionMonitoring();
+    }
+    
+    console.log('🎯 Starting immediate dropdown interaction monitoring');
+    console.log('🎯 Current URL:', window.location.href);
+    console.log('🎯 Document ready state:', document.readyState);
+    this.dropdownInteractionState.isActive = true;
+    
+    // Listen for ALL clicks and use smart behavioral detection
+    this.dropdownInteractionState.clickListener = (event) => {
+      const target = event.target;
+      if (!target || target.nodeType !== Node.ELEMENT_NODE) return;
+      
+      // Record the click with context for behavioral analysis
+      this.recordClickEvent(target);
+    };
+    
+    // Add click listener to document with capture=true for early detection
+    document.addEventListener('click', this.dropdownInteractionState.clickListener, true);
+    
+    console.log('🎯 Behavioral click detection active');
+  },
+  
+  stopDropdownInteractionMonitoring() {
+    if (!this.dropdownInteractionState.isActive) return;
+    
+    console.log('🎯 Stopping dropdown interaction monitoring');
+    this.dropdownInteractionState.isActive = false;
+    
+    if (this.dropdownInteractionState.clickListener) {
+      document.removeEventListener('click', this.dropdownInteractionState.clickListener, true);
+      this.dropdownInteractionState.clickListener = null;
+    }
+    
+    if (this.dropdownInteractionState.reanalysisTimeout) {
+      clearTimeout(this.dropdownInteractionState.reanalysisTimeout);
+      this.dropdownInteractionState.reanalysisTimeout = null;
+    }
+  },
+  
+  // Smart behavioral click detection - observes click → DOM change patterns
+  clickBehaviorTracker: {
+    recentClicks: [],
+    maxClickHistory: 10,
+    domChangeTimeout: 500, // ms to wait for DOM changes after click
+    minElementsToTrigger: 3  // minimum new elements to consider significant
+  },
+  
+  recordClickEvent(target) {
+    const clickTime = Date.now();
+    const tagName = target.tagName?.toLowerCase() || '';
+    const isInteractive = target.matches('a, button, [role="button"], [tabindex], [onclick]') || 
+                          target.closest('a, button, [role="button"]');
+    
+    // Only track potentially interactive elements
+    if (!isInteractive) return;
+    
+    console.log('🎯 Recording click on interactive element:', tagName, target.className);
+    
+    // Add to click history
+    const clickEvent = {
+      timestamp: clickTime,
+      target: target,
+      tagName: tagName,
+      className: target.className || '',
+      elementCount: document.querySelectorAll('*').length
+    };
+    
+    this.clickBehaviorTracker.recentClicks.push(clickEvent);
+    
+    // Keep only recent clicks
+    if (this.clickBehaviorTracker.recentClicks.length > this.clickBehaviorTracker.maxClickHistory) {
+      this.clickBehaviorTracker.recentClicks.shift();
+    }
+    
+    // Set up DOM change observation for this click
+    this.observeDOMChangesAfterClick(clickEvent);
+  },
+  
+  observeDOMChangesAfterClick(clickEvent) {
+    const initialElementCount = clickEvent.elementCount;
+    
+    // Wait for DOM changes and then check if significant content was added
+    setTimeout(() => {
+      const currentElementCount = document.querySelectorAll('*').length;
+      const elementDelta = currentElementCount - initialElementCount;
+      
+      console.log(`🧠 DOM change check: ${initialElementCount} → ${currentElementCount} (Δ${elementDelta})`);
+      
+      // If significant new content appeared, trigger reanalysis
+      if (elementDelta >= this.clickBehaviorTracker.minElementsToTrigger) {
+        console.log('🚨 Significant DOM changes detected after click! Triggering reanalysis...');
+        
+        // Clear any pending reanalysis
+        if (this.dropdownInteractionState.reanalysisTimeout) {
+          clearTimeout(this.dropdownInteractionState.reanalysisTimeout);
+        }
+        
+        // Trigger immediate reanalysis
+        this.dropdownInteractionState.reanalysisTimeout = setTimeout(() => {
+          console.log('🔄 Running behavioral reanalysis due to DOM changes');
+          this.visualize();
+        }, 100); // Short delay for final DOM updates
+      }
+    }, this.clickBehaviorTracker.domChangeTimeout);
   }
 };
 
@@ -1738,6 +2110,8 @@ window.performBrowserAction = async function performBrowserAction(action, params
         return getDropdownOptions(params.index);
       case 'selectDropdownOption':
         return selectDropdownOption(params.index, params.text);
+      case 'videoControl':
+        return await performVideoAction(params.action, params.time, params.amount);
       default:
         throw new Error(`Unknown browser action: ${action}`);
     }
@@ -1750,6 +2124,1317 @@ window.performBrowserAction = async function performBrowserAction(action, params
     };
   }
 };
+
+// =============================================================================
+// UNIVERSAL VIDEO HANDLER - Smart multi-platform video control for agents
+// =============================================================================
+
+// Main video action dispatcher for LLM agents
+async function performVideoAction(action, timeParam, amount) {
+  console.log(`🎬 Video action: ${action}, time: ${timeParam}, amount: ${amount}`);
+  
+  try {
+    const videoHandler = new UniversalVideoHandler();
+    await videoHandler.initialize();
+    
+    switch (action) {
+      case 'play':
+        return await videoHandler.play();
+      case 'pause':
+        return await videoHandler.pause();
+      case 'toggle':
+        return await videoHandler.togglePlayPause();
+      case 'seek':
+        return await videoHandler.seek(timeParam);
+      case 'seekForward':
+        return await videoHandler.seekRelative(amount || 10, 'forward');
+      case 'seekBackward':
+        return await videoHandler.seekRelative(amount || 10, 'backward');
+      case 'seekToStart':
+        return await videoHandler.seek(0);
+      case 'seekToEnd':
+        return await videoHandler.seekToEnd();
+      case 'getInfo':
+        return await videoHandler.getVideoInfo();
+      case 'setVolume':
+        return await videoHandler.setVolume(timeParam); // reuse timeParam for volume
+      case 'mute':
+        return await videoHandler.mute();
+      case 'unmute':
+        return await videoHandler.unmute();
+      case 'setPlaybackRate':
+        return await videoHandler.setPlaybackRate(timeParam); // reuse timeParam for speed
+      case 'getCaptions':
+        return await videoHandler.getCaptions();
+      case 'enableCaption':
+        return await videoHandler.enableCaption(timeParam); // timeParam = language code
+      case 'disableCaptions':
+        return await videoHandler.disableCaptions();
+      case 'getCurrentCaption':
+        return await videoHandler.getCurrentCaption();
+      case 'extractAllCaptions':
+        return await videoHandler.extractAllCaptions();
+      case 'getCaptionText':
+        return await videoHandler.getCaptionText(timeParam); // timeParam = time in seconds
+      default:
+        throw new Error(`Unknown video action: ${action}`);
+    }
+  } catch (error) {
+    console.error('❌ Video action failed:', error);
+    return {
+      success: false,
+      error: error.message,
+      action: action
+    };
+  }
+}
+
+// Universal video handler class
+class UniversalVideoHandler {
+  constructor() {
+    this.playerType = null;
+    this.videoElement = null;
+    this.playerAPI = null;
+  }
+  
+  async initialize() {
+    console.log('🔍 Detecting video player type...');
+    
+    // Detect player type and get appropriate handlers
+    const detection = this.detectVideoPlayer();
+    this.playerType = detection.type;
+    this.videoElement = detection.element;
+    this.playerAPI = detection.api;
+    
+    console.log(`📺 Detected player: ${this.playerType}`);
+    
+    if (!this.playerType || this.playerType === 'none') {
+      throw new Error('No video player detected on this page');
+    }
+  }
+  
+  // Smart video player detection
+  detectVideoPlayer() {
+    // Priority order: Platform APIs > HTML5 Video > DOM manipulation
+    
+    // 1. YouTube embedded player
+    if (window.YT && window.YT.Player) {
+      const iframes = document.querySelectorAll('iframe[src*="youtube.com"], iframe[src*="youtu.be"]');
+      if (iframes.length > 0) {
+        // Try to get existing player instance
+        const playerId = iframes[0].id || 'youtube-player';
+        try {
+          const player = window.YT.get ? window.YT.get(playerId) : null;
+          if (player) {
+            return { type: 'youtube', element: iframes[0], api: player };
+          }
+        } catch (e) {
+          console.log('YouTube player instance not accessible');
+        }
+      }
+    }
+    
+    // 2. YouTube direct page (not embedded)
+    if (window.location.hostname.includes('youtube.com')) {
+      const video = document.querySelector('video');
+      if (video) {
+        return { type: 'youtube-direct', element: video, api: null };
+      }
+    }
+    
+    // 3. Vimeo embedded player
+    if (window.Vimeo && window.Vimeo.Player) {
+      const iframes = document.querySelectorAll('iframe[src*="vimeo.com"]');
+      if (iframes.length > 0) {
+        try {
+          const player = new window.Vimeo.Player(iframes[0]);
+          return { type: 'vimeo', element: iframes[0], api: player };
+        } catch (e) {
+          console.log('Vimeo player not accessible');
+        }
+      }
+    }
+    
+    // 4. Netflix (requires special handling)
+    if (window.location.hostname.includes('netflix.com')) {
+      const video = document.querySelector('video');
+      if (video) {
+        return { type: 'netflix', element: video, api: this.getNetflixAPI() };
+      }
+    }
+    
+    // 5. Amazon Prime Video
+    if (window.location.hostname.includes('primevideo.com') || window.location.hostname.includes('amazon.com')) {
+      const video = document.querySelector('video');
+      if (video) {
+        return { type: 'amazon-prime', element: video, api: null };
+      }
+    }
+    
+    // 6. Generic HTML5 video (most common)
+    const videos = document.querySelectorAll('video');
+    if (videos.length > 0) {
+      // Find the largest/most visible video
+      let bestVideo = videos[0];
+      let maxArea = 0;
+      
+      for (const video of videos) {
+        const rect = video.getBoundingClientRect();
+        const area = rect.width * rect.height;
+        if (area > maxArea && rect.width > 100 && rect.height > 100) {
+          maxArea = area;
+          bestVideo = video;
+        }
+      }
+      
+      return { type: 'html5', element: bestVideo, api: null };
+    }
+    
+    // 7. Try to find video controls (fallback for custom players)
+    const playButtons = document.querySelectorAll('[class*="play"], [id*="play"], [aria-label*="play" i], [title*="play" i]');
+    if (playButtons.length > 0) {
+      return { type: 'custom', element: playButtons[0], api: null };
+    }
+    
+    return { type: 'none', element: null, api: null };
+  }
+  
+  // Get Netflix API if available (may not work due to frequent changes)
+  getNetflixAPI() {
+    try {
+      if (window.netflix && window.netflix.appContext) {
+        const videoPlayer = window.netflix.appContext.state.playerApp.getAPI().videoPlayer;
+        const sessionId = videoPlayer.getAllPlayerSessionIds()[0];
+        return videoPlayer.getVideoPlayerBySessionId(sessionId);
+      }
+    } catch (e) {
+      console.log('Netflix API not accessible:', e);
+    }
+    return null;
+  }
+  
+  // Parse time input from LLM (supports multiple formats)
+  parseTime(timeInput, duration = 0) {
+    if (typeof timeInput === 'number') {
+      return timeInput; // Already in seconds
+    }
+    
+    if (typeof timeInput !== 'string') {
+      return 0;
+    }
+    
+    const input = timeInput.toLowerCase().trim();
+    
+    // Predefined positions
+    if (input === 'start' || input === 'beginning') return 0;
+    if (input === 'end' || input === 'finish') return duration;
+    if (input === 'middle' || input === 'center') return duration / 2;
+    
+    // Percentage (e.g., "50%", "25%")
+    if (input.includes('%')) {
+      const percent = parseFloat(input.replace('%', ''));
+      return (percent / 100) * duration;
+    }
+    
+    // Time formats
+    // HH:MM:SS or MM:SS
+    if (input.includes(':')) {
+      const parts = input.split(':').map(p => parseInt(p) || 0);
+      if (parts.length === 3) {
+        return parts[0] * 3600 + parts[1] * 60 + parts[2]; // HH:MM:SS
+      } else if (parts.length === 2) {
+        return parts[0] * 60 + parts[1]; // MM:SS
+      }
+    }
+    
+    // Seconds with unit (e.g., "30s", "120sec")
+    if (input.match(/^\d+s(ec(onds?)?)?$/)) {
+      return parseInt(input.match(/\d+/)[0]);
+    }
+    
+    // Minutes with unit (e.g., "2m", "5min")
+    if (input.match(/^\d+m(in(utes?)?)?$/)) {
+      return parseInt(input.match(/\d+/)[0]) * 60;
+    }
+    
+    // Plain number (assume seconds)
+    if (!isNaN(input)) {
+      return parseFloat(input);
+    }
+    
+    return 0; // Default fallback
+  }
+  
+  // Play video
+  async play() {
+    try {
+      switch (this.playerType) {
+        case 'youtube':
+          if (this.playerAPI && this.playerAPI.playVideo) {
+            this.playerAPI.playVideo();
+            return { success: true, message: 'YouTube video playing' };
+          }
+          break;
+          
+        case 'vimeo':
+          if (this.playerAPI && this.playerAPI.play) {
+            await this.playerAPI.play();
+            return { success: true, message: 'Vimeo video playing' };
+          }
+          break;
+          
+        case 'netflix':
+          if (this.playerAPI && this.playerAPI.play) {
+            this.playerAPI.play();
+            return { success: true, message: 'Netflix video playing' };
+          }
+          // Fallback to HTML5
+          break;
+          
+        case 'html5':
+        case 'youtube-direct':
+        case 'amazon-prime':
+        default:
+          if (this.videoElement && this.videoElement.play) {
+            await this.videoElement.play();
+            return { success: true, message: 'Video playing' };
+          }
+          break;
+      }
+      
+      // Fallback: try to click play button
+      const playButton = document.querySelector('[aria-label*="play" i], [title*="play" i], .play-button, .ytp-play-button');
+      if (playButton && !playButton.hidden) {
+        playButton.click();
+        return { success: true, message: 'Clicked play button' };
+      }
+      
+      throw new Error('Unable to play video - no accessible play method found');
+    } catch (error) {
+      throw new Error(`Play failed: ${error.message}`);
+    }
+  }
+  
+  // Pause video
+  async pause() {
+    try {
+      switch (this.playerType) {
+        case 'youtube':
+          if (this.playerAPI && this.playerAPI.pauseVideo) {
+            this.playerAPI.pauseVideo();
+            return { success: true, message: 'YouTube video paused' };
+          }
+          break;
+          
+        case 'vimeo':
+          if (this.playerAPI && this.playerAPI.pause) {
+            await this.playerAPI.pause();
+            return { success: true, message: 'Vimeo video paused' };
+          }
+          break;
+          
+        case 'netflix':
+          if (this.playerAPI && this.playerAPI.pause) {
+            this.playerAPI.pause();
+            return { success: true, message: 'Netflix video paused' };
+          }
+          // Fallback to HTML5
+          break;
+          
+        case 'html5':
+        case 'youtube-direct':
+        case 'amazon-prime':
+        default:
+          if (this.videoElement && this.videoElement.pause) {
+            this.videoElement.pause();
+            return { success: true, message: 'Video paused' };
+          }
+          break;
+      }
+      
+      // Fallback: try to click pause button
+      const pauseButton = document.querySelector('[aria-label*="pause" i], [title*="pause" i], .pause-button, .ytp-pause-button');
+      if (pauseButton && !pauseButton.hidden) {
+        pauseButton.click();
+        return { success: true, message: 'Clicked pause button' };
+      }
+      
+      throw new Error('Unable to pause video - no accessible pause method found');
+    } catch (error) {
+      throw new Error(`Pause failed: ${error.message}`);
+    }
+  }
+  
+  // Toggle play/pause
+  async togglePlayPause() {
+    const info = await this.getVideoInfo();
+    if (info.success && info.isPlaying) {
+      return await this.pause();
+    } else {
+      return await this.play();
+    }
+  }
+  
+  // Seek to specific time
+  async seek(timeParam) {
+    try {
+      const duration = await this.getDuration();
+      const targetTime = this.parseTime(timeParam, duration);
+      
+      console.log(`🎯 Seeking to ${targetTime}s (parsed from "${timeParam}")`);
+      
+      switch (this.playerType) {
+        case 'youtube':
+          if (this.playerAPI && this.playerAPI.seekTo) {
+            this.playerAPI.seekTo(targetTime, true);
+            return { success: true, message: `Seeked to ${targetTime}s`, time: targetTime };
+          }
+          break;
+          
+        case 'vimeo':
+          if (this.playerAPI && this.playerAPI.setCurrentTime) {
+            await this.playerAPI.setCurrentTime(targetTime);
+            return { success: true, message: `Seeked to ${targetTime}s`, time: targetTime };
+          }
+          break;
+          
+        case 'netflix':
+          if (this.playerAPI && this.playerAPI.seek) {
+            this.playerAPI.seek(targetTime * 1000); // Netflix uses milliseconds
+            return { success: true, message: `Seeked to ${targetTime}s`, time: targetTime };
+          }
+          // Fallback to HTML5
+          break;
+          
+        case 'html5':
+        case 'youtube-direct':
+        case 'amazon-prime':
+        default:
+          if (this.videoElement) {
+            // Use fastSeek if available for performance, otherwise currentTime
+            if (this.videoElement.fastSeek) {
+              this.videoElement.fastSeek(targetTime);
+            } else {
+              this.videoElement.currentTime = targetTime;
+            }
+            return { success: true, message: `Seeked to ${targetTime}s`, time: targetTime };
+          }
+          break;
+      }
+      
+      throw new Error('Unable to seek - no accessible seek method found');
+    } catch (error) {
+      throw new Error(`Seek failed: ${error.message}`);
+    }
+  }
+  
+  // Seek relative to current position
+  async seekRelative(amount, direction) {
+    try {
+      const currentTime = await this.getCurrentTime();
+      const newTime = direction === 'forward' ? currentTime + amount : currentTime - amount;
+      return await this.seek(Math.max(0, newTime));
+    } catch (error) {
+      throw new Error(`Relative seek failed: ${error.message}`);
+    }
+  }
+  
+  // Seek to end
+  async seekToEnd() {
+    try {
+      const duration = await this.getDuration();
+      return await this.seek(Math.max(0, duration - 5)); // 5 seconds before end
+    } catch (error) {
+      throw new Error(`Seek to end failed: ${error.message}`);
+    }
+  }
+  
+  // Get current time
+  async getCurrentTime() {
+    switch (this.playerType) {
+      case 'youtube':
+        if (this.playerAPI && this.playerAPI.getCurrentTime) {
+          return this.playerAPI.getCurrentTime();
+        }
+        break;
+        
+      case 'vimeo':
+        if (this.playerAPI && this.playerAPI.getCurrentTime) {
+          return await this.playerAPI.getCurrentTime();
+        }
+        break;
+        
+      case 'netflix':
+        if (this.playerAPI && this.playerAPI.getCurrentTime) {
+          return this.playerAPI.getCurrentTime() / 1000; // Convert from milliseconds
+        }
+        break;
+        
+      case 'html5':
+      case 'youtube-direct':
+      case 'amazon-prime':
+      default:
+        if (this.videoElement) {
+          return this.videoElement.currentTime;
+        }
+        break;
+    }
+    return 0;
+  }
+  
+  // Get duration
+  async getDuration() {
+    switch (this.playerType) {
+      case 'youtube':
+        if (this.playerAPI && this.playerAPI.getDuration) {
+          return this.playerAPI.getDuration();
+        }
+        break;
+        
+      case 'vimeo':
+        if (this.playerAPI && this.playerAPI.getDuration) {
+          return await this.playerAPI.getDuration();
+        }
+        break;
+        
+      case 'netflix':
+        if (this.playerAPI && this.playerAPI.getDuration) {
+          return this.playerAPI.getDuration() / 1000; // Convert from milliseconds
+        }
+        break;
+        
+      case 'html5':
+      case 'youtube-direct':
+      case 'amazon-prime':
+      default:
+        if (this.videoElement) {
+          return this.videoElement.duration || 0;
+        }
+        break;
+    }
+    return 0;
+  }
+  
+  // Check if video is playing
+  async isPlaying() {
+    switch (this.playerType) {
+      case 'youtube':
+        if (this.playerAPI && this.playerAPI.getPlayerState) {
+          return this.playerAPI.getPlayerState() === 1; // YT.PlayerState.PLAYING
+        }
+        break;
+        
+      case 'vimeo':
+        if (this.playerAPI && this.playerAPI.getPaused) {
+          return !(await this.playerAPI.getPaused());
+        }
+        break;
+        
+      case 'netflix':
+        if (this.playerAPI && this.playerAPI.isPaused) {
+          return !this.playerAPI.isPaused();
+        }
+        break;
+        
+      case 'html5':
+      case 'youtube-direct':
+      case 'amazon-prime':
+      default:
+        if (this.videoElement) {
+          return !this.videoElement.paused;
+        }
+        break;
+    }
+    return false;
+  }
+  
+  // Get comprehensive video info
+  async getVideoInfo() {
+    try {
+      const currentTime = await this.getCurrentTime();
+      const duration = await this.getDuration();
+      const isPlaying = await this.isPlaying();
+      
+      const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
+      
+      return {
+        success: true,
+        playerType: this.playerType,
+        currentTime: Math.round(currentTime * 100) / 100,
+        duration: Math.round(duration * 100) / 100,
+        progress: Math.round(progress * 100) / 100,
+        isPlaying: isPlaying,
+        formattedTime: `${this.formatTime(currentTime)} / ${this.formatTime(duration)}`,
+        url: window.location.href
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error.message,
+        playerType: this.playerType
+      };
+    }
+  }
+  
+  // Set volume (0-100)
+  async setVolume(volume) {
+    const vol = Math.max(0, Math.min(100, parseInt(volume) || 50));
+    
+    try {
+      switch (this.playerType) {
+        case 'youtube':
+          if (this.playerAPI && this.playerAPI.setVolume) {
+            this.playerAPI.setVolume(vol);
+            return { success: true, message: `Volume set to ${vol}%` };
+          }
+          break;
+          
+        case 'vimeo':
+          if (this.playerAPI && this.playerAPI.setVolume) {
+            await this.playerAPI.setVolume(vol / 100);
+            return { success: true, message: `Volume set to ${vol}%` };
+          }
+          break;
+          
+        case 'html5':
+        case 'youtube-direct':
+        case 'amazon-prime':
+        case 'netflix':
+        default:
+          if (this.videoElement) {
+            this.videoElement.volume = vol / 100;
+            return { success: true, message: `Volume set to ${vol}%` };
+          }
+          break;
+      }
+      
+      throw new Error('Unable to set volume - no accessible method found');
+    } catch (error) {
+      throw new Error(`Set volume failed: ${error.message}`);
+    }
+  }
+  
+  // Mute video
+  async mute() {
+    try {
+      switch (this.playerType) {
+        case 'youtube':
+          if (this.playerAPI && this.playerAPI.mute) {
+            this.playerAPI.mute();
+            return { success: true, message: 'Video muted' };
+          }
+          break;
+          
+        case 'vimeo':
+          if (this.playerAPI && this.playerAPI.setVolume) {
+            await this.playerAPI.setVolume(0);
+            return { success: true, message: 'Video muted' };
+          }
+          break;
+          
+        case 'html5':
+        case 'youtube-direct':
+        case 'amazon-prime':
+        case 'netflix':
+        default:
+          if (this.videoElement) {
+            this.videoElement.muted = true;
+            return { success: true, message: 'Video muted' };
+          }
+          break;
+      }
+      
+      throw new Error('Unable to mute - no accessible method found');
+    } catch (error) {
+      throw new Error(`Mute failed: ${error.message}`);
+    }
+  }
+  
+  // Unmute video
+  async unmute() {
+    try {
+      switch (this.playerType) {
+        case 'youtube':
+          if (this.playerAPI && this.playerAPI.unMute) {
+            this.playerAPI.unMute();
+            return { success: true, message: 'Video unmuted' };
+          }
+          break;
+          
+        case 'vimeo':
+          if (this.playerAPI && this.playerAPI.setVolume) {
+            await this.playerAPI.setVolume(1);
+            return { success: true, message: 'Video unmuted' };
+          }
+          break;
+          
+        case 'html5':
+        case 'youtube-direct':
+        case 'amazon-prime':
+        case 'netflix':
+        default:
+          if (this.videoElement) {
+            this.videoElement.muted = false;
+            return { success: true, message: 'Video unmuted' };
+          }
+          break;
+      }
+      
+      throw new Error('Unable to unmute - no accessible method found');
+    } catch (error) {
+      throw new Error(`Unmute failed: ${error.message}`);
+    }
+  }
+  
+  // Set playback rate/speed (e.g., 1.5x, 0.5x)
+  async setPlaybackRate(rate) {
+    const speed = Math.max(0.25, Math.min(4, parseFloat(rate) || 1));
+    
+    try {
+      switch (this.playerType) {
+        case 'youtube':
+          if (this.playerAPI && this.playerAPI.setPlaybackRate) {
+            this.playerAPI.setPlaybackRate(speed);
+            return { success: true, message: `Playback rate set to ${speed}x` };
+          }
+          break;
+          
+        case 'vimeo':
+          if (this.playerAPI && this.playerAPI.setPlaybackRate) {
+            await this.playerAPI.setPlaybackRate(speed);
+            return { success: true, message: `Playback rate set to ${speed}x` };
+          }
+          break;
+          
+        case 'html5':
+        case 'youtube-direct':
+        case 'amazon-prime':
+        case 'netflix':
+        default:
+          if (this.videoElement) {
+            this.videoElement.playbackRate = speed;
+            return { success: true, message: `Playback rate set to ${speed}x` };
+          }
+          break;
+      }
+      
+      throw new Error('Unable to set playback rate - no accessible method found');
+    } catch (error) {
+      throw new Error(`Set playback rate failed: ${error.message}`);
+    }
+  }
+  
+  // =============================================================================
+  // CAPTION/SUBTITLE SUPPORT
+  // =============================================================================
+  
+  // Get all available captions/subtitles
+  async getCaptions() {
+    try {
+      console.log('🔍 Getting available captions...');
+      
+      switch (this.playerType) {
+        case 'youtube':
+          return await this.getYouTubeCaptions();
+          
+        case 'vimeo':
+          return await this.getVimeoCaptions();
+          
+        case 'html5':
+        case 'youtube-direct':
+        case 'amazon-prime':
+        case 'netflix':
+        default:
+          return await this.getHTML5Captions();
+      }
+    } catch (error) {
+      console.error('❌ Error getting captions:', error);
+      return {
+        success: false,
+        error: error.message,
+        captions: []
+      };
+    }
+  }
+  
+  // Get YouTube captions (limited by API restrictions)
+  async getYouTubeCaptions() {
+    const captions = [];
+    
+    try {
+      // Try to access YouTube's internal caption data
+      if (window.ytInitialPlayerResponse && window.ytInitialPlayerResponse.captions) {
+        const captionTracks = window.ytInitialPlayerResponse.captions.playerCaptionsTracklistRenderer?.captionTracks;
+        
+        if (captionTracks) {
+          for (const track of captionTracks) {
+            captions.push({
+              kind: track.kind || 'subtitles',
+              language: track.languageCode,
+              label: track.name?.simpleText || track.languageCode,
+              isDefault: track.isDefault || false,
+              isAutoGenerated: track.vssId?.includes('autogen') || false
+            });
+          }
+        }
+      }
+      
+      // Fallback: Try to get from player API if available
+      if (captions.length === 0 && this.playerAPI) {
+        try {
+          // This requires the video to be playing
+          const captionOptions = this.playerAPI.getOptions && this.playerAPI.getOptions('captions');
+          if (captionOptions) {
+            console.log('📺 YouTube caption options found:', captionOptions);
+          }
+        } catch (e) {
+          console.log('YouTube caption API not accessible:', e.message);
+        }
+      }
+      
+    } catch (error) {
+      console.log('YouTube caption detection error:', error);
+    }
+    
+    return {
+      success: true,
+      playerType: 'youtube',
+      captions: captions,
+      message: captions.length > 0 ? `Found ${captions.length} caption tracks` : 'No captions available',
+      limitation: 'YouTube caption access is limited. Start video playback for better detection.'
+    };
+  }
+  
+  // Get Vimeo captions using player.js API
+  async getVimeoCaptions() {
+    const captions = [];
+    
+    try {
+      if (this.playerAPI && this.playerAPI.getTextTracks) {
+        const tracks = await this.playerAPI.getTextTracks();
+        
+        for (const track of tracks) {
+          captions.push({
+            kind: track.kind || 'subtitles', // 'captions' or 'subtitles'
+            language: track.language,
+            label: track.label,
+            mode: track.mode, // 'showing' or 'disabled'
+            isActive: track.mode === 'showing'
+          });
+        }
+      }
+    } catch (error) {
+      console.log('Vimeo caption detection error:', error);
+    }
+    
+    return {
+      success: true,
+      playerType: 'vimeo',
+      captions: captions,
+      message: captions.length > 0 ? `Found ${captions.length} caption tracks` : 'No captions available'
+    };
+  }
+  
+  // Get HTML5 video captions using TextTrack API
+  async getHTML5Captions() {
+    const captions = [];
+    
+    try {
+      if (this.videoElement && this.videoElement.textTracks) {
+        const tracks = this.videoElement.textTracks;
+        
+        for (let i = 0; i < tracks.length; i++) {
+          const track = tracks[i];
+          captions.push({
+            kind: track.kind, // 'subtitles', 'captions', 'chapters', 'metadata'
+            language: track.language,
+            label: track.label,
+            mode: track.mode, // 'disabled', 'hidden', 'showing'
+            isActive: track.mode === 'showing',
+            trackIndex: i
+          });
+        }
+      }
+    } catch (error) {
+      console.log('HTML5 caption detection error:', error);
+    }
+    
+    return {
+      success: true,
+      playerType: this.playerType,
+      captions: captions,
+      message: captions.length > 0 ? `Found ${captions.length} caption tracks` : 'No captions available'
+    };
+  }
+  
+  // Enable specific caption track
+  async enableCaption(languageCode) {
+    try {
+      console.log(`📝 Enabling caption: ${languageCode}`);
+      
+      switch (this.playerType) {
+        case 'youtube':
+          return await this.enableYouTubeCaption(languageCode);
+          
+        case 'vimeo':
+          return await this.enableVimeoCaption(languageCode);
+          
+        case 'html5':
+        case 'youtube-direct':
+        case 'amazon-prime':
+        case 'netflix':
+        default:
+          return await this.enableHTML5Caption(languageCode);
+      }
+    } catch (error) {
+      throw new Error(`Enable caption failed: ${error.message}`);
+    }
+  }
+  
+  // Enable YouTube caption (limited functionality)
+  async enableYouTubeCaption(languageCode) {
+    try {
+      // Try clicking the CC button and selecting language
+      const ccButton = document.querySelector('.ytp-subtitles-button, .ytp-cc-button');
+      if (ccButton) {
+        ccButton.click();
+        
+        // Wait a moment for menu to appear
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // Try to find and click the language option
+        const languageOptions = document.querySelectorAll('[role="menuitemradio"], .ytp-menuitem');
+        for (const option of languageOptions) {
+          if (option.textContent && option.textContent.toLowerCase().includes(languageCode.toLowerCase())) {
+            option.click();
+            return { success: true, message: `Enabled ${languageCode} captions`, language: languageCode };
+          }
+        }
+      }
+      
+      return { success: false, message: 'Could not enable YouTube captions - manual control required' };
+    } catch (error) {
+      throw new Error(`YouTube caption enable failed: ${error.message}`);
+    }
+  }
+  
+  // Enable Vimeo caption using API
+  async enableVimeoCaption(languageCode) {
+    try {
+      if (this.playerAPI && this.playerAPI.enableTextTrack) {
+        const track = await this.playerAPI.enableTextTrack(languageCode, 'subtitles');
+        return { 
+          success: true, 
+          message: `Enabled ${track.language} captions`,
+          language: track.language,
+          kind: track.kind,
+          label: track.label
+        };
+      }
+      
+      throw new Error('Vimeo player API not available');
+    } catch (error) {
+      throw new Error(`Vimeo caption enable failed: ${error.message}`);
+    }
+  }
+  
+  // Enable HTML5 caption
+  async enableHTML5Caption(languageCode) {
+    try {
+      if (this.videoElement && this.videoElement.textTracks) {
+        const tracks = this.videoElement.textTracks;
+        let trackFound = false;
+        
+        // Disable all tracks first
+        for (let i = 0; i < tracks.length; i++) {
+          tracks[i].mode = 'disabled';
+        }
+        
+        // Enable the requested track
+        for (let i = 0; i < tracks.length; i++) {
+          const track = tracks[i];
+          if (track.language === languageCode || track.label.toLowerCase().includes(languageCode.toLowerCase())) {
+            track.mode = 'showing';
+            trackFound = true;
+            return {
+              success: true,
+              message: `Enabled ${track.language || track.label} captions`,
+              language: track.language,
+              label: track.label,
+              kind: track.kind
+            };
+          }
+        }
+        
+        if (!trackFound) {
+          throw new Error(`Caption track not found for language: ${languageCode}`);
+        }
+      }
+      
+      throw new Error('No text tracks available');
+    } catch (error) {
+      throw new Error(`HTML5 caption enable failed: ${error.message}`);
+    }
+  }
+  
+  // Disable all captions
+  async disableCaptions() {
+    try {
+      console.log('🚫 Disabling all captions...');
+      
+      switch (this.playerType) {
+        case 'youtube':
+          return await this.disableYouTubeCaptions();
+          
+        case 'vimeo':
+          return await this.disableVimeoCaptions();
+          
+        case 'html5':
+        case 'youtube-direct':
+        case 'amazon-prime':
+        case 'netflix':
+        default:
+          return await this.disableHTML5Captions();
+      }
+    } catch (error) {
+      throw new Error(`Disable captions failed: ${error.message}`);
+    }
+  }
+  
+  // Disable YouTube captions
+  async disableYouTubeCaptions() {
+    try {
+      const ccButton = document.querySelector('.ytp-subtitles-button, .ytp-cc-button');
+      if (ccButton && ccButton.getAttribute('aria-pressed') === 'true') {
+        ccButton.click();
+        return { success: true, message: 'YouTube captions disabled' };
+      }
+      return { success: true, message: 'YouTube captions already disabled' };
+    } catch (error) {
+      throw new Error(`YouTube captions disable failed: ${error.message}`);
+    }
+  }
+  
+  // Disable Vimeo captions
+  async disableVimeoCaptions() {
+    try {
+      if (this.playerAPI && this.playerAPI.disableTextTrack) {
+        await this.playerAPI.disableTextTrack();
+        return { success: true, message: 'Vimeo captions disabled' };
+      }
+      
+      // Fallback: disable via getTextTracks and manual control
+      if (this.playerAPI && this.playerAPI.getTextTracks) {
+        const tracks = await this.playerAPI.getTextTracks();
+        for (const track of tracks) {
+          if (track.mode === 'showing') {
+            // Try to enable with empty language to disable
+            try {
+              await this.playerAPI.enableTextTrack('', track.kind);
+            } catch (e) {
+              // This might not work, but worth trying
+            }
+          }
+        }
+        return { success: true, message: 'Vimeo captions disabled (best effort)' };
+      }
+      
+      throw new Error('Vimeo player API not available');
+    } catch (error) {
+      throw new Error(`Vimeo captions disable failed: ${error.message}`);
+    }
+  }
+  
+  // Disable HTML5 captions
+  async disableHTML5Captions() {
+    try {
+      if (this.videoElement && this.videoElement.textTracks) {
+        const tracks = this.videoElement.textTracks;
+        
+        for (let i = 0; i < tracks.length; i++) {
+          tracks[i].mode = 'disabled';
+        }
+        
+        return { success: true, message: 'HTML5 captions disabled' };
+      }
+      
+      throw new Error('No text tracks available');
+    } catch (error) {
+      throw new Error(`HTML5 captions disable failed: ${error.message}`);
+    }
+  }
+  
+  // Get current caption text (if possible)
+  async getCurrentCaption() {
+    try {
+      console.log('💬 Getting current caption text...');
+      
+      switch (this.playerType) {
+        case 'html5':
+        case 'youtube-direct':
+        case 'amazon-prime':
+        case 'netflix':
+          return await this.getCurrentHTML5Caption();
+          
+        case 'youtube':
+        case 'vimeo':
+        default:
+          // YouTube and Vimeo don't expose caption text directly
+          return {
+            success: false,
+            message: 'Caption text not accessible via API for this platform',
+            playerType: this.playerType
+          };
+      }
+    } catch (error) {
+      return {
+        success: false,
+        error: error.message,
+        playerType: this.playerType
+      };
+    }
+  }
+  
+  // Get current HTML5 caption text
+  async getCurrentHTML5Caption() {
+    try {
+      if (this.videoElement && this.videoElement.textTracks) {
+        const tracks = this.videoElement.textTracks;
+        const currentTime = this.videoElement.currentTime;
+        
+        for (let i = 0; i < tracks.length; i++) {
+          const track = tracks[i];
+          
+          if (track.mode === 'showing' && track.cues) {
+            for (let j = 0; j < track.cues.length; j++) {
+              const cue = track.cues[j];
+              
+              if (currentTime >= cue.startTime && currentTime <= cue.endTime) {
+                return {
+                  success: true,
+                  text: cue.text,
+                  startTime: cue.startTime,
+                  endTime: cue.endTime,
+                  language: track.language,
+                  kind: track.kind
+                };
+              }
+            }
+          }
+        }
+        
+        return {
+          success: true,
+          text: null,
+          message: 'No caption text at current time'
+        };
+      }
+      
+      throw new Error('No text tracks available');
+    } catch (error) {
+      throw new Error(`Get current caption failed: ${error.message}`);
+    }
+  }
+  
+  // Extract all caption text (HTML5 only - works without playback)
+  async extractAllCaptions() {
+    try {
+      console.log('📋 Extracting all caption text...');
+      
+      if (this.playerType !== 'html5' && 
+          this.playerType !== 'youtube-direct' && 
+          this.playerType !== 'amazon-prime' && 
+          this.playerType !== 'netflix') {
+        return {
+          success: false,
+          error: 'Full caption extraction only available for HTML5 videos',
+          playerType: this.playerType
+        };
+      }
+      
+      if (!this.videoElement || !this.videoElement.textTracks) {
+        throw new Error('No text tracks available');
+      }
+      
+      const tracks = this.videoElement.textTracks;
+      const allCaptions = [];
+      
+      for (let i = 0; i < tracks.length; i++) {
+        const track = tracks[i];
+        
+        // Only process subtitle and caption tracks
+        if (track.kind !== 'subtitles' && track.kind !== 'captions') {
+          continue;
+        }
+        
+        const trackData = {
+          language: track.language,
+          label: track.label,
+          kind: track.kind,
+          cues: []
+        };
+        
+        // Access cues (this works even when video isn't playing)
+        if (track.cues && track.cues.length > 0) {
+          for (let j = 0; j < track.cues.length; j++) {
+            const cue = track.cues[j];
+            trackData.cues.push({
+              startTime: cue.startTime,
+              endTime: cue.endTime,
+              text: cue.text,
+              id: cue.id || null
+            });
+          }
+        } else {
+          // If cues are not loaded, try to trigger loading
+          console.log(`🔄 Attempting to load cues for ${track.label}...`);
+          
+          // Temporarily enable the track to load cues
+          const originalMode = track.mode;
+          track.mode = 'hidden'; // Hidden loads cues without showing
+          
+          // Wait a moment for cues to load
+          await new Promise(resolve => setTimeout(resolve, 500));
+          
+          if (track.cues && track.cues.length > 0) {
+            for (let j = 0; j < track.cues.length; j++) {
+              const cue = track.cues[j];
+              trackData.cues.push({
+                startTime: cue.startTime,
+                endTime: cue.endTime,
+                text: cue.text,
+                id: cue.id || null
+              });
+            }
+          }
+          
+          // Restore original mode
+          track.mode = originalMode;
+        }
+        
+        allCaptions.push(trackData);
+      }
+      
+      return {
+        success: true,
+        playerType: this.playerType,
+        tracks: allCaptions,
+        totalTracks: allCaptions.length,
+        totalCues: allCaptions.reduce((sum, track) => sum + track.cues.length, 0),
+        message: `Extracted ${allCaptions.length} caption tracks with ${allCaptions.reduce((sum, track) => sum + track.cues.length, 0)} total cues`,
+        note: 'This works without video playback for HTML5 videos'
+      };
+      
+    } catch (error) {
+      return {
+        success: false,
+        error: error.message,
+        playerType: this.playerType
+      };
+    }
+  }
+  
+  // Get caption text at specific time (HTML5 only)
+  async getCaptionText(timeInSeconds) {
+    try {
+      const targetTime = parseFloat(timeInSeconds) || 0;
+      console.log(`🔍 Getting caption text at ${targetTime}s...`);
+      
+      if (this.playerType !== 'html5' && 
+          this.playerType !== 'youtube-direct' && 
+          this.playerType !== 'amazon-prime' && 
+          this.playerType !== 'netflix') {
+        return {
+          success: false,
+          error: 'Caption text lookup only available for HTML5 videos',
+          playerType: this.playerType
+        };
+      }
+      
+      if (!this.videoElement || !this.videoElement.textTracks) {
+        throw new Error('No text tracks available');
+      }
+      
+      const tracks = this.videoElement.textTracks;
+      const results = [];
+      
+      for (let i = 0; i < tracks.length; i++) {
+        const track = tracks[i];
+        
+        // Only check subtitle and caption tracks
+        if (track.kind !== 'subtitles' && track.kind !== 'captions') {
+          continue;
+        }
+        
+        // Temporarily enable track to load cues if needed
+        const originalMode = track.mode;
+        if (track.mode === 'disabled') {
+          track.mode = 'hidden';
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        
+        if (track.cues) {
+          for (let j = 0; j < track.cues.length; j++) {
+            const cue = track.cues[j];
+            
+            if (targetTime >= cue.startTime && targetTime <= cue.endTime) {
+              results.push({
+                language: track.language,
+                label: track.label,
+                kind: track.kind,
+                text: cue.text,
+                startTime: cue.startTime,
+                endTime: cue.endTime,
+                cueId: cue.id || null
+              });
+            }
+          }
+        }
+        
+        // Restore original mode
+        track.mode = originalMode;
+      }
+      
+      return {
+        success: true,
+        targetTime: targetTime,
+        results: results,
+        count: results.length,
+        message: results.length > 0 
+          ? `Found ${results.length} caption(s) at ${targetTime}s`
+          : `No captions found at ${targetTime}s`
+      };
+      
+    } catch (error) {
+      return {
+        success: false,
+        error: error.message,
+        targetTime: timeInSeconds
+      };
+    }
+  }
+  
+  // =============================================================================
+  // END CAPTION SUPPORT
+  // =============================================================================
+  
+  // Format seconds to MM:SS or HH:MM:SS
+  formatTime(seconds) {
+    const hrs = Math.floor(seconds / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
+    const secs = Math.floor(seconds % 60);
+    
+    if (hrs > 0) {
+      return `${hrs}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    } else {
+      return `${mins}:${secs.toString().padStart(2, '0')}`;
+    }
+  }
+}
+
+// =============================================================================
+// END VIDEO HANDLER
+// =============================================================================
 
 // Click element by index
 function clickElementByIndex(index) {

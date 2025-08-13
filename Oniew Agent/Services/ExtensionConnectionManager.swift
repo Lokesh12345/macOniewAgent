@@ -833,6 +833,65 @@ class ExtensionConnectionManager: ObservableObject {
         sendMessage(type: "execute_action", data: action)
     }
     
+    func executeVideoControl(action: String, time: String? = nil, amount: Int? = nil) {
+        print("🎬 Executing video control: \(action)")
+        if let time = time {
+            print("   Time parameter: \(time)")
+        }
+        if let amount = amount {
+            print("   Amount parameter: \(amount)")
+        }
+        
+        var videoData: [String: Any] = [
+            "action": action  // This will be params.action in the video handler
+        ]
+
+        if let time = time {
+            videoData["time"] = time
+        }
+        
+        if let amount = amount {
+            videoData["amount"] = amount
+        }
+        
+        var browserAction: [String: Any] = [
+            "action": "videoControl"
+        ]
+        
+        // Merge video data into browser action
+        for (key, value) in videoData {
+            browserAction[key] = value
+        }
+        
+        sendMessage(type: "execute_browser_action", data: browserAction)
+    }
+    
+    func executeVideoCaptionControl(action: String, language: String? = nil) {
+        print("📝 Executing video caption control: \(action)")
+        if let language = language {
+            print("   Language parameter: \(language)")
+        }
+        
+        var captionData: [String: Any] = [
+            "action": action  // getCaptions, enableCaption, disableCaptions, getCurrentCaption
+        ]
+        
+        if let language = language {
+            captionData["time"] = language  // Reuse time parameter for language code
+        }
+        
+        var browserAction: [String: Any] = [
+            "action": "videoControl"
+        ]
+        
+        // Merge caption data into browser action
+        for (key, value) in captionData {
+            browserAction[key] = value
+        }
+        
+        sendMessage(type: "execute_browser_action", data: browserAction)
+    }
+    
     func executeTask(_ task: String, tabId: Int? = nil) {
         let taskId = UUID().uuidString
         print("🚀 Mac app executing task: '\(task)' with ID: \(taskId)")

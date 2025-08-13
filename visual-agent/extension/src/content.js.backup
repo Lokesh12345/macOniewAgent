@@ -1276,9 +1276,6 @@ window.domAnalyzer = {
     // Start intelligent SPA monitoring to detect delayed content loading
     this.startSPAMonitoring();
     
-    // Start immediate dropdown interaction monitoring
-    this.startDropdownInteractionMonitoring();
-    
     return {
       totalElements: elementCount,
       elementMap: elementMap
@@ -1337,7 +1334,6 @@ window.domAnalyzer = {
     if (container) {
       container.remove();
     }
-    this.stopDropdownInteractionMonitoring();
   },
   
   // Navigation handling - clear state when page changes
@@ -1548,9 +1544,6 @@ window.domAnalyzer = {
       clearInterval(engine.checkIntervalId);
       engine.checkIntervalId = null;
     }
-    
-    // Also stop dropdown monitoring
-    this.stopDropdownInteractionMonitoring();
   },
   
   // Monitor DOM mutations with rate calculation
@@ -1564,58 +1557,16 @@ window.domAnalyzer = {
       
       // Check for significant content additions
       let significantAdditions = 0;
-      let hasDropdownContent = false;
-      
       mutations.forEach(mutation => {
         if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
           mutation.addedNodes.forEach(node => {
             if (node.nodeType === Node.ELEMENT_NODE) {
-              // Enhanced detection for dropdown/menu content
-              const tagName = node.tagName?.toLowerCase() || '';
-              const className = node.className?.toLowerCase() || '';
-              const role = node.getAttribute?.('role')?.toLowerCase() || '';
-              
-              // Check for dynamic content patterns (generic approach)
-              const isDynamicContent = 
-                // Common dynamic UI patterns
-                className.includes('dropdown') ||
-                className.includes('menu') ||
-                className.includes('popover') ||
-                className.includes('tooltip') ||
-                className.includes('overlay') ||
-                className.includes('modal') ||
-                className.includes('popup') ||
-                
-                // Semantic roles that indicate dynamic content
-                role.includes('menu') ||
-                role.includes('listbox') ||
-                role.includes('combobox') ||
-                role.includes('dialog') ||
-                
-                // Structural patterns that suggest dynamic content
-                tagName === 'ul' && node.children?.length > 2 ||
-                tagName === 'nav' ||
-                tagName === 'aside' && node.children?.length > 1 ||
-                
-                // Container patterns with multiple children (likely dynamic lists/menus)
-                node.children?.length > 3 && (
-                  className.includes('nav') || 
-                  className.includes('list') ||
-                  className.includes('items')
-                );
-              
               // Check if it's a significant container (has children or specific patterns)
               const isSignificant = node.children?.length > 2 || 
                                    node.classList?.length > 0 ||
-                                   tagName === 'section' ||
-                                   tagName === 'article' ||
-                                   tagName === 'aside' ||
-                                   isDynamicContent;
-              
-              if (isDynamicContent) {
-                hasDropdownContent = true;
-                console.log('🧠 Dynamic content detected:', tagName, className);
-              }
+                                   node.tagName?.toLowerCase() === 'section' ||
+                                   node.tagName?.toLowerCase() === 'article' ||
+                                   node.tagName?.toLowerCase() === 'aside';
               
               if (isSignificant) {
                 significantAdditions++;
@@ -1623,38 +1574,7 @@ window.domAnalyzer = {
             }
           });
         }
-        
-        // Also check for style/visibility changes that might reveal content
-        if (mutation.type === 'attributes' && mutation.attributeName === 'style') {
-          const element = mutation.target;
-          if (element.nodeType === Node.ELEMENT_NODE) {
-            const style = element.style;
-            const className = element.className?.toLowerCase() || '';
-            
-            // Check if something was made visible (dynamic content behavior)
-            if ((style.display !== 'none' && style.visibility !== 'hidden')) {
-              // Check if this element or its children suggest dynamic content
-              const hasMultipleChildren = element.children?.length > 2;
-              const hasDynamicClasses = className.includes('dropdown') || 
-                                      className.includes('menu') || 
-                                      className.includes('popup') ||
-                                      className.includes('modal');
-              
-              if (hasMultipleChildren || hasDynamicClasses) {
-                hasDropdownContent = true;
-                console.log('🧠 Element visibility changed (dynamic content):', element.tagName, className);
-              }
-            }
-          }
-        }
       });
-      
-      // For any significant content, reduce the stability threshold for faster response
-      if (hasDropdownContent || significantAdditions >= engine.config.significantElementThreshold) {
-        engine.config.stabilityThreshold = 150; // 150ms for dynamic content
-        engine.signals.significantContentAdded = true;
-        console.log('🧠 Dynamic content detected - reducing stability threshold to 150ms');
-      }
       
       if (significantAdditions >= engine.config.significantElementThreshold) {
         engine.signals.significantContentAdded = true;
@@ -1662,12 +1582,11 @@ window.domAnalyzer = {
       }
     });
     
-    // Observe entire document with enhanced dropdown detection
+    // Observe entire document but with optimizations
     engine.mutationObserver.observe(document.body, {
       childList: true,
       subtree: true,
-      attributes: true, // Watch for style/class changes (dropdowns)
-      attributeFilter: ['style', 'class', 'aria-expanded', 'aria-hidden'], // Only specific attributes
+      attributes: false, // Skip attribute changes for performance
       characterData: false // Skip text changes for performance
     });
   },
@@ -1918,122 +1837,6 @@ window.domAnalyzer = {
     }
     
     return `/${parts.join('/')}`;
-  },
-  
-  // Immediate dropdown interaction monitoring - for instant response to menu clicks
-  dropdownInteractionState: {
-    isActive: false,
-    clickListener: null,
-    reanalysisTimeout: null
-  },
-  
-  startDropdownInteractionMonitoring() {
-    if (this.dropdownInteractionState.isActive) {
-      this.stopDropdownInteractionMonitoring();
-    }
-    
-    console.log('🎯 Starting immediate dropdown interaction monitoring');
-    console.log('🎯 Current URL:', window.location.href);
-    console.log('🎯 Document ready state:', document.readyState);
-    this.dropdownInteractionState.isActive = true;
-    
-    // Listen for ALL clicks and use smart behavioral detection
-    this.dropdownInteractionState.clickListener = (event) => {
-      const target = event.target;
-      if (!target || target.nodeType !== Node.ELEMENT_NODE) return;
-      
-      // Record the click with context for behavioral analysis
-      this.recordClickEvent(target);
-    };
-    
-    // Add click listener to document with capture=true for early detection
-    document.addEventListener('click', this.dropdownInteractionState.clickListener, true);
-    
-    console.log('🎯 Behavioral click detection active');
-  },
-  
-  stopDropdownInteractionMonitoring() {
-    if (!this.dropdownInteractionState.isActive) return;
-    
-    console.log('🎯 Stopping dropdown interaction monitoring');
-    this.dropdownInteractionState.isActive = false;
-    
-    if (this.dropdownInteractionState.clickListener) {
-      document.removeEventListener('click', this.dropdownInteractionState.clickListener, true);
-      this.dropdownInteractionState.clickListener = null;
-    }
-    
-    if (this.dropdownInteractionState.reanalysisTimeout) {
-      clearTimeout(this.dropdownInteractionState.reanalysisTimeout);
-      this.dropdownInteractionState.reanalysisTimeout = null;
-    }
-  },
-  
-  // Smart behavioral click detection - observes click → DOM change patterns
-  clickBehaviorTracker: {
-    recentClicks: [],
-    maxClickHistory: 10,
-    domChangeTimeout: 500, // ms to wait for DOM changes after click
-    minElementsToTrigger: 3  // minimum new elements to consider significant
-  },
-  
-  recordClickEvent(target) {
-    const clickTime = Date.now();
-    const tagName = target.tagName?.toLowerCase() || '';
-    const isInteractive = target.matches('a, button, [role="button"], [tabindex], [onclick]') || 
-                          target.closest('a, button, [role="button"]');
-    
-    // Only track potentially interactive elements
-    if (!isInteractive) return;
-    
-    console.log('🎯 Recording click on interactive element:', tagName, target.className);
-    
-    // Add to click history
-    const clickEvent = {
-      timestamp: clickTime,
-      target: target,
-      tagName: tagName,
-      className: target.className || '',
-      elementCount: document.querySelectorAll('*').length
-    };
-    
-    this.clickBehaviorTracker.recentClicks.push(clickEvent);
-    
-    // Keep only recent clicks
-    if (this.clickBehaviorTracker.recentClicks.length > this.clickBehaviorTracker.maxClickHistory) {
-      this.clickBehaviorTracker.recentClicks.shift();
-    }
-    
-    // Set up DOM change observation for this click
-    this.observeDOMChangesAfterClick(clickEvent);
-  },
-  
-  observeDOMChangesAfterClick(clickEvent) {
-    const initialElementCount = clickEvent.elementCount;
-    
-    // Wait for DOM changes and then check if significant content was added
-    setTimeout(() => {
-      const currentElementCount = document.querySelectorAll('*').length;
-      const elementDelta = currentElementCount - initialElementCount;
-      
-      console.log(`🧠 DOM change check: ${initialElementCount} → ${currentElementCount} (Δ${elementDelta})`);
-      
-      // If significant new content appeared, trigger reanalysis
-      if (elementDelta >= this.clickBehaviorTracker.minElementsToTrigger) {
-        console.log('🚨 Significant DOM changes detected after click! Triggering reanalysis...');
-        
-        // Clear any pending reanalysis
-        if (this.dropdownInteractionState.reanalysisTimeout) {
-          clearTimeout(this.dropdownInteractionState.reanalysisTimeout);
-        }
-        
-        // Trigger immediate reanalysis
-        this.dropdownInteractionState.reanalysisTimeout = setTimeout(() => {
-          console.log('🔄 Running behavioral reanalysis due to DOM changes');
-          this.visualize();
-        }, 100); // Short delay for final DOM updates
-      }
-    }, this.clickBehaviorTracker.domChangeTimeout);
   }
 };
 

@@ -41,7 +41,8 @@
       "Bash(ps:*)",
       "WebFetch(domain:developer.chrome.com)",
       "WebFetch(domain:github.com)",
-      "Bash(npm run:*)"
+      "Bash(npm run:*)",
+      "WebFetch(domain:docs.anthropic.com)"
     ],
     "deny": []
   }
