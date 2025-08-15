@@ -32,6 +32,7 @@ export interface ExecutorExtraArgs {
   extractorLLM?: BaseChatModel;
   agentOptions?: Partial<AgentOptions>;
   generalSettings?: GeneralSettingsConfig;
+  context?: any;
 }
 
 export class Executor {
@@ -44,6 +45,10 @@ export class Executor {
   private readonly validatorPrompt: ValidatorPrompt;
   private readonly generalSettings: GeneralSettingsConfig | undefined;
   private tasks: string[] = [];
+  private pendingUserInputs: Map<string, { resolve: (value: string) => void; reject: (reason?: any) => void }> = new Map();
+  
+  // 🚨 Pattern detection for stuck clicking
+  private lastClickedElements: Array<{elementIndex: number, step: number, result: string}> = [];
   constructor(
     task: string,
     taskId: string,
@@ -68,7 +73,7 @@ export class Executor {
     this.generalSettings = extraArgs?.generalSettings;
     this.tasks.push(task);
     this.navigatorPrompt = new NavigatorPrompt(context.options.maxActionsPerStep);
-    this.plannerPrompt = new PlannerPrompt();
+    this.plannerPrompt = new PlannerPrompt(extraArgs?.context);
     this.validatorPrompt = new ValidatorPrompt(task);
 
     const actionBuilder = new ActionBuilder(context, extractorLLM);
@@ -254,6 +259,72 @@ export class Executor {
     }
   }
 
+  /**
+   * 🚨 CRITICAL: Detect if agent is stuck clicking same elements repeatedly
+   * Force scroll action if pattern detected
+   */
+  private detectStuckClickingPattern(): void {
+    const context = this.context;
+    
+    // Track recent click actions from action results
+    const recentClickActions = context.actionResults
+      .slice(-5) // Look at last 5 actions
+      .filter(result => result.extractedContent?.includes('Clicked button with index'))
+      .map(result => {
+        const match = result.extractedContent?.match(/Clicked button with index (\d+)/);
+        return match ? {
+          elementIndex: parseInt(match[1]),
+          step: context.nSteps,
+          result: result.extractedContent || ''
+        } : null;
+      })
+      .filter(Boolean) as Array<{elementIndex: number, step: number, result: string}>;
+
+    if (recentClickActions.length < 2) return;
+
+    // Check for same element clicked multiple times
+    const elementCounts = new Map<number, number>();
+    for (const action of recentClickActions) {
+      elementCounts.set(action.elementIndex, (elementCounts.get(action.elementIndex) || 0) + 1);
+    }
+
+    // Find elements clicked 2+ times
+    const repeatedElements = Array.from(elementCounts.entries()).filter(([_, count]) => count >= 2);
+    
+    if (repeatedElements.length > 0) {
+      const [repeatedIndex, clickCount] = repeatedElements[0];
+      
+      // Check if these are Next/Continue/Submit buttons (common stuck pattern)
+      const hasNavigationButtons = recentClickActions.some(action => 
+        action.elementIndex === repeatedIndex && 
+        (action.result.includes('Next') || action.result.includes('Continue') || action.result.includes('Submit'))
+      );
+
+      if (hasNavigationButtons) {
+        const forceScrollMsg = `🚨 STUCK PATTERN DETECTED: Element ${repeatedIndex} clicked ${clickCount} times (appears to be Next/Continue button). ` +
+          `FORCING SCROLL: scroll_small down 20% to find the active element. This overrides the current planned action.`;
+        
+        console.log(forceScrollMsg);
+        logger.info(forceScrollMsg);
+        
+        // Force add a scroll action to the context
+        const scrollAction = {
+          scroll_small: {
+            intent: 'FORCED - Break stuck clicking pattern',
+            direction: 'down' as const,
+            amount: 20
+          }
+        };
+
+        // Add the forced scroll as high-priority message
+        context.messageManager.addSystemMessage(`${forceScrollMsg}\n\nFORCED ACTION REQUIRED: ${JSON.stringify(scrollAction)}\n\nExecute this scroll action immediately before any other planned actions.`);
+
+        // Mark for re-planning to incorporate the forced scroll
+        context.needsReplanning = true;
+      }
+    }
+  }
+
   private async navigate(): Promise<boolean> {
     const context = this.context;
     try {
@@ -262,6 +333,10 @@ export class Executor {
       if (context.paused || context.stopped) {
         return false;
       }
+
+      // 🚨 CRITICAL: Pattern detection for stuck clicking before executing
+      this.detectStuckClickingPattern();
+
       const navOutput = await this.navigator.execute();
       // check if the task is paused or stopped
       if (context.paused || context.stopped) {
@@ -439,5 +514,52 @@ export class Executor {
     }
 
     return results;
+  }
+
+  /**
+   * Request user input and wait for response
+   */
+  async requestUserInput(prompt: string, inputType: string = 'text'): Promise<string> {
+    const inputId = `user_input_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    
+    return new Promise((resolve, reject) => {
+      // Store the promise resolvers
+      this.pendingUserInputs.set(inputId, { resolve, reject });
+      
+      // Send request to Mac app via event system
+      // We need to send this via the background script's message system
+      // For now, we'll emit an event and handle it in the background script
+      this.context.emitEvent(Actors.SYSTEM, ExecutionState.ACT_OK, `Requesting user input: ${prompt}`);
+      
+      // Set timeout for user input (5 minutes)
+      setTimeout(() => {
+        if (this.pendingUserInputs.has(inputId)) {
+          this.pendingUserInputs.delete(inputId);
+          reject(new Error('User input timeout'));
+        }
+      }, 300000); // 5 minutes
+    });
+  }
+
+  /**
+   * Handle user input response from Mac app
+   */
+  async handleUserInput(inputId: string, value: string): Promise<void> {
+    const pending = this.pendingUserInputs.get(inputId);
+    if (pending) {
+      this.pendingUserInputs.delete(inputId);
+      
+      if (value === 'CANCELLED' || value === 'DISMISSED') {
+        pending.reject(new Error('User cancelled input'));
+      } else if (value === 'SKIP') {
+        pending.resolve(''); // Empty string for skip
+      } else {
+        pending.resolve(value);
+      }
+      
+      logger.info(`User input received for ${inputId}: ${value}`);
+    } else {
+      logger.warn(`No pending user input found for ID: ${inputId}`);
+    }
   }
 }

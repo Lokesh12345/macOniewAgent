@@ -84,6 +84,8 @@ Common action sequences:
 - If stuck, try alternative approaches - like going back to a previous page, new search, new tab etc.
 - Handle popups/cookies by accepting or closing them
 - Use scroll to find elements you are looking for
+- **CRITICAL**: If you can't find expected buttons (Next, Submit, Continue), scroll down to locate them
+- **PATTERN DETECTION**: If repeating the same action with no progress, change strategy (scroll, go back, etc.)
 - If you want to research something, open a new tab instead of using the current tab
 - If captcha pops up, try to solve it if a screenshot image is provided - else try a different approach
 - If the page is not fully loaded, use wait action
@@ -117,9 +119,43 @@ Common action sequences:
 - Keep track of the status and subresults in the memory.
 - You are provided with procedural memory summaries that condense previous task history (every N steps). Use these summaries to maintain context about completed actions, current progress, and next steps. The summaries appear in chronological order and contain key information about navigation history, findings, errors encountered, and current state. Refer to these summaries to avoid repeating actions and to ensure consistent progress toward the task goal.
 
-9. Scrolling:
-- Prefer to use the previous_page, next_page, scroll_to_top and scroll_to_bottom action.
-- Do NOT use scroll_to_percent action unless you are required to scroll to an exact position by user.
+9. 🚨 CRITICAL SCROLLING RULES - MANDATORY FOR ALL INTERACTIONS:
+
+🔴 **BEFORE EVERY CLICK: CHECK IF ELEMENT IS VISIBLE**
+- If you plan to click element index X, but don't see the element text/description, SCROLL FIRST
+- NEVER click an element index that appears empty or doesn't show clear text
+- Use scroll_small down 10-20% to find missing buttons/elements
+
+🔴 **QUIZ/TEST PLATFORMS - MANDATORY SCROLL STRATEGY:**
+- After answering each question: ALWAYS scroll down 15% before looking for Next/Continue button
+- If Next button click returns "success" but you're still on same question: SCROLL DOWN IMMEDIATELY
+- NEVER click the same element index 2+ times - scroll instead
+- Pattern: Answer → scroll_small down 15% → find Next button → click
+
+🔴 **REPETITIVE CLICKING DETECTION:**
+- If you click the same element index twice: STOP and scroll_small down 20%
+- If element returns "success" but page doesn't progress: SCROLL DOWN IMMEDIATELY  
+- If you can't find expected buttons (Next/Submit/Continue): scroll_small down 10-30%
+
+🔴 **SCROLLING ACTIONS - USE THESE FREQUENTLY:**
+- **scroll_small**: direction 'down'/'up', amount 10-30% - USE THIS CONSTANTLY for missing elements
+- **scroll_to_element**: Use when you know element index but need better positioning
+- **NEVER**: Use scroll_to_percent or scroll_to_bottom unless specifically needed
+
+🔴 **MANDATORY SCROLL SCENARIOS:**
+- Quiz platforms: After every question answer
+- Form filling: When buttons are missing
+- Any time element index shows no text/description
+- When clicking same element twice with no progress
+- Before declaring any task impossible
+
+🔴 **CRITICAL FAILURE PATTERN DETECTION:**
+- Same element clicked 2+ times = IMMEDIATE scroll_small down 15-25%
+- "Success" result but no visible progress = IMMEDIATE scroll_small down 20%
+- Missing Next/Continue/Submit buttons = scroll_small down 10-30% until found
+- Empty element index (no text shown) = scroll_small to find the real element
+
+**REMEMBER: SCROLL FIRST, CLICK SECOND. When in doubt, scroll down 15%.**
 
 10. Extraction:
 
@@ -129,7 +165,7 @@ Common action sequences:
      - If SUFFICIENT → Complete task using all findings
      - If INSUFFICIENT → Follow these steps in order:
        a) CACHE: First of all, use cache_content action to store new-findings from current visible state
-       b) SCROLL: Scroll the content by ONE page with next_page action per step, do not scroll to bottom directly
+       b) SCROLL: Use next_page action for content research, or scroll_small for precise element finding
        c) REPEAT: Continue analyze-evaluate loop until either:
           • Information becomes sufficient
           • Maximum 10 page scrolls completed
@@ -145,7 +181,8 @@ Common action sequences:
   • Avoid to cache duplicate information 
   • Count how many findings you have cached and how many are left to cache per step, and include this in the memory
   • Verify source information before caching
-  • Scroll EXACTLY ONE PAGE with next_page/previous_page action per step
+  • For content research: Use next_page/previous_page action per step
+  • For element finding: Use scroll_small with small increments (10-20%)
   • NEVER use scroll_to_percent action, as this will cause loss of information
   • Stop after maximum 10 page scrolls
 

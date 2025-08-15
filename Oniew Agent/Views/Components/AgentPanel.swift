@@ -479,6 +479,9 @@ struct AgentPanel: View {
     }
     
     private func setupExecutorEventListener() {
+        // Remove any existing observers first to prevent duplicates
+        NotificationCenter.default.removeObserver(self, name: Notification.Name("ExecutorStateChanged"), object: nil)
+        
         // Listen for executor events from the extension
         NotificationCenter.default.addObserver(
             forName: Notification.Name("ExecutorStateChanged"),
@@ -486,7 +489,7 @@ struct AgentPanel: View {
             queue: .main
         ) { notification in
             if let event = notification.userInfo as? [String: Any] {
-                handleExecutorEvent(event)
+                self.handleExecutorEvent(event)
             }
         }
         
@@ -547,170 +550,269 @@ struct AgentPanel: View {
     }
     
     private func handleExecutorEvent(_ event: [String: Any]) {
-        guard let state = event["state"] as? String else { return }
-        
         // Find the most recent question (current task)
         guard let lastIndex = questions.indices.last else { return }
         
+        // Extract event details - same format as extension side panel
+        guard let state = event["state"] as? String,
+              let actor = event["actor"] as? String else { 
+            return 
+        }
+        
+        let eventData = event["data"] as? [String: Any] ?? [:]
+        let details = eventData["details"] as? String ?? ""
+        let eventTimestamp = event["timestamp"] as? Int ?? 0
+        let taskId = eventData["taskId"] as? String ?? ""
+        let step = eventData["step"] as? Int ?? 0
+        
+        // Create a unique event ID for UI-level deduplication
+        let eventId = "\(actor)_\(state)_\(taskId)_\(step)_\(eventTimestamp)"
+        
+        // Check if we've already processed this exact event in the UI
+        if questions[lastIndex].stepIds.contains(eventId) {
+            print("⚠️ UI: Duplicate event detected, skipping: \(eventId)")
+            return
+        }
+        
+        // Clean up old step IDs to prevent memory buildup (keep last 100)
+        if questions[lastIndex].stepIds.count > 100 {
+            let oldIds = Array(questions[lastIndex].stepIds.prefix(questions[lastIndex].stepIds.count - 100))
+            oldIds.forEach { questions[lastIndex].stepIds.remove($0) }
+        }
+        
+        // Create a message-like object similar to extension side panel
+        let message = createMessage(actor: actor, content: details, state: state, eventData: eventData)
+        
+        // Process the message based on actor and state - same logic as extension
+        switch actor {
+        case "system":
+            handleSystemMessage(message, state: state, lastIndex: lastIndex, eventId: eventId)
+        case "planner":
+            handlePlannerMessage(message, state: state, lastIndex: lastIndex, eventId: eventId)
+        case "navigator":
+            handleNavigatorMessage(message, state: state, lastIndex: lastIndex, eventId: eventId)
+        case "validator":
+            handleValidatorMessage(message, state: state, lastIndex: lastIndex, eventId: eventId)
+        default:
+            print("Unknown actor: \(actor)")
+        }
+    }
+    
+    // MARK: - Message Creation and Handling (Same as Extension)
+    
+    private func createMessage(actor: String, content: String, state: String, eventData: [String: Any] = [:]) -> [String: Any] {
+        return [
+            "actor": actor,
+            "content": content,
+            "timestamp": Date().timeIntervalSince1970 * 1000,  // Convert to milliseconds like extension
+            "state": state,
+            "eventData": eventData
+        ]
+    }
+    
+    private func handleSystemMessage(_ message: [String: Any], state: String, lastIndex: Int, eventId: String) {
         switch state {
-        case "TASK_START":
+        case "task.start":
             questions[lastIndex].isExecuting = true
             questions[lastIndex].executionSteps.removeAll()
             questions[lastIndex].stepIds.removeAll()
             questions[lastIndex].taskStartTime = Date()
             questions[lastIndex].taskEndTime = nil
-            
-            // Start timer
             startTaskTimer()
             
-            // Add simplified task analysis steps with 2-second delays
-            addTaskAnalysisSteps(to: lastIndex)
-            
-        case "STEP_START":
-            if let step = event["step"] as? Int {
-                questions[lastIndex].currentStep = step
-            }
-            if let maxSteps = event["maxSteps"] as? Int {
-                questions[lastIndex].totalSteps = maxSteps
-            }
-            
-        case "PLANNER_OUTPUT":
-            if let data = event["data"] as? [String: Any] {
-                let observation = data["observation"] as? String ?? "Planning..."
-                let reasoning = data["reasoning"] as? String ?? ""
-                let nextSteps = data["next_steps"] as? String ?? ""
-                let webTask = data["web_task"] as? String ?? ""
-                let done = data["done"] as? Bool ?? false
-                
-                // Create detailed planning information
-                var planningDetails = ""
-                if !observation.isEmpty {
-                    planningDetails += "📋 **Current Situation:**\n\(observation)\n\n"
-                }
-                if !reasoning.isEmpty {
-                    planningDetails += "🤔 **Analysis & Reasoning:**\n\(reasoning)\n\n"
-                }
-                if !webTask.isEmpty {
-                    planningDetails += "🌐 **Web Task Identified:**\n\(webTask)\n\n"
-                }
-                if !nextSteps.isEmpty {
-                    // Check if this contains the answer for direct questions
-                    let isDirectAnswer = done && nextSteps.contains("won") || nextSteps.contains("answer") || nextSteps.contains("result")
-                    if isDirectAnswer {
-                        planningDetails += "💡 **Answer Found:**\n\(nextSteps)\n\n"
-                    } else {
-                        planningDetails += "📝 **Planned Steps:**\n\(nextSteps)\n\n"
-                    }
-                }
-                planningDetails += "✅ **Planning Status:** \(done ? "Task ready for completion" : "Continuing with execution")"
-                
-                let stepId = "planner_\(observation.hashValue)_\(reasoning.hashValue)"
-                guard !questions[lastIndex].stepIds.contains(stepId) else { return }
-                
-                let step = ExecutionStep(
-                    stepNumber: questions[lastIndex].currentStep,
-                    timestamp: Date(),
-                    type: .planning,
-                    title: done ? "🎯 Answer Found" : "🧠 Strategic Planning Complete",
-                    details: planningDetails,
-                    status: .completed
-                )
-                
-                questions[lastIndex].stepIds.insert(stepId)
-                addStepWithAnimation(step, to: lastIndex)
-                
-                // If task is done with a direct answer, also update the question's answer
-                if done && !nextSteps.isEmpty {
-                    questions[lastIndex].answer = nextSteps
-                }
-            }
-            
-        case "NAVIGATOR_ACTION":
-            if let data = event["data"] as? [String: Any] {
-                let actionType = data["action"] as? String ?? "Unknown Action"
-                let details = data["details"] as? String ?? ""
-                
-                let step = ExecutionStep(
-                    stepNumber: questions[lastIndex].currentStep,
-                    timestamp: Date(),
-                    type: .navigation,
-                    title: "🎯 Navigation Action",
-                    details: "Action: \(actionType)\n\nDetails: \(details)",
-                    status: .running
-                )
-                questions[lastIndex].executionSteps.append(step)
-            }
-            
-        case "VALIDATOR_OUTPUT":
-            if let data = event["data"] as? [String: Any] {
-                let isValid = data["is_valid"] as? Bool ?? false
-                let reason = data["reason"] as? String ?? ""
-                let answer = data["answer"] as? String ?? ""
-                
-                let step = ExecutionStep(
-                    stepNumber: questions[lastIndex].currentStep,
-                    timestamp: Date(),
-                    type: .validation,
-                    title: isValid ? "✅ Validation Passed" : "❌ Validation Failed",
-                    details: "Result: \(isValid ? "Valid" : "Invalid")\n\nReason: \(reason)\n\nAnswer: \(answer)",
-                    status: isValid ? .completed : .error
-                )
-                questions[lastIndex].executionSteps.append(step)
-            }
-            
-        case "TASK_OK", "TASK_COMPLETE":
+        case "task.ok":
             questions[lastIndex].isExecuting = false
             questions[lastIndex].taskEndTime = Date()
             stopTaskTimer()
+            addCompletionMessage(lastIndex: lastIndex, success: true)
             
-            let stepId = "task_complete_\(Date().timeIntervalSince1970)"
-            guard !questions[lastIndex].stepIds.contains(stepId) else { return }
-            
-            let completionStep = ExecutionStep(
-                stepNumber: questions[lastIndex].currentStep + 1,
-                timestamp: Date(),
-                type: .completed,
-                title: "🎉 Task Completed Successfully",
-                details: "All objectives achieved! The task has been completed successfully.",
-                status: .completed
-            )
-            
-            questions[lastIndex].stepIds.insert(stepId)
-            addStepWithAnimation(completionStep, to: lastIndex)
-            
-            // Clear any active step when task completes
-            questions[lastIndex].activeStepId = nil
-            
-        case "TASK_FAIL":
+        case "task.fail":
             questions[lastIndex].isExecuting = false
             questions[lastIndex].taskEndTime = Date()
             stopTaskTimer()
+            addCompletionMessage(lastIndex: lastIndex, success: false, error: message["content"] as? String)
             
-            let error = event["error"] as? String ?? "Unknown error"
-            let stepId = "task_fail_\(error.hashValue)"
-            guard !questions[lastIndex].stepIds.contains(stepId) else { return }
-            
-            let errorStep = ExecutionStep(
-                stepNumber: questions[lastIndex].currentStep + 1,
-                timestamp: Date(),
-                type: .error,
-                title: "❌ Task Failed",
-                details: "❌ **Error Details:**\n\(error)\n\n🔄 **Suggestion:** Try rephrasing your request or check if the target website is accessible.",
-                status: .error
-            )
-            
-            questions[lastIndex].stepIds.insert(stepId)
-            addStepWithAnimation(errorStep, to: lastIndex)
-            
-            // Clear any active step when task fails
-            questions[lastIndex].activeStepId = nil
-            
-        case "TASK_CANCEL":
+        case "task.cancel":
             questions[lastIndex].isExecuting = false
+            questions[lastIndex].taskEndTime = Date()
+            stopTaskTimer()
+            addCompletionMessage(lastIndex: lastIndex, success: false, error: "Task cancelled")
             
         default:
             break
         }
+    }
+    
+    private func handlePlannerMessage(_ message: [String: Any], state: String, lastIndex: Int, eventId: String) {
+        let content = message["content"] as? String ?? ""
+        let timestamp = Date()
+        
+        switch state {
+        case "step.start":
+            // Show progress for planner start
+            break
+        case "step.ok":
+            // Add planner result as a step - same as extension side panel
+            let stepId = "planner_ok_\(eventId)"
+            guard !questions[lastIndex].stepIds.contains(stepId) else { 
+                print("⚠️ UI: Duplicate planner step detected, skipping: \(stepId)")
+                return 
+            }
+            
+            let step = ExecutionStep(
+                stepNumber: questions[lastIndex].currentStep,
+                timestamp: timestamp,
+                type: .planning,
+                title: "🧠 Planner",
+                details: content,
+                status: .completed
+            )
+            
+            questions[lastIndex].stepIds.insert(stepId)
+            addStepWithAnimation(step, to: lastIndex)
+            
+        default:
+            break
+        }
+    }
+    
+    private func handleNavigatorMessage(_ message: [String: Any], state: String, lastIndex: Int, eventId: String) {
+        let content = message["content"] as? String ?? ""
+        let timestamp = Date()
+        
+        switch state {
+        case "step.start":
+            // Show progress for navigator start
+            break
+        case "step.ok":
+            // Navigator completed a step
+            break
+        case "act.start":
+            // Navigator starting an action - same as extension
+            let stepId = "navigator_act_\(eventId)"
+            guard !questions[lastIndex].stepIds.contains(stepId) else { 
+                print("⚠️ UI: Duplicate navigator act.start detected, skipping: \(stepId)")
+                return 
+            }
+            
+            let step = ExecutionStep(
+                stepNumber: questions[lastIndex].currentStep,
+                timestamp: timestamp,
+                type: .navigation,
+                title: "🔍 Navigator",
+                details: content,
+                status: .running
+            )
+            
+            questions[lastIndex].stepIds.insert(stepId)
+            addStepWithAnimation(step, to: lastIndex)
+            
+        case "act.ok":
+            // Navigator completed an action
+            let stepId = "navigator_done_\(eventId)"
+            guard !questions[lastIndex].stepIds.contains(stepId) else { 
+                print("⚠️ UI: Duplicate navigator act.ok detected, skipping: \(stepId)")
+                return 
+            }
+            
+            let step = ExecutionStep(
+                stepNumber: questions[lastIndex].currentStep,
+                timestamp: timestamp,
+                type: .navigation,
+                title: "✅ Navigator",
+                details: content.isEmpty ? "Action completed successfully" : content,
+                status: .completed
+            )
+            
+            questions[lastIndex].stepIds.insert(stepId)
+            addStepWithAnimation(step, to: lastIndex)
+            
+        case "act.fail":
+            // Navigator action failed
+            let stepId = "navigator_fail_\(eventId)"
+            guard !questions[lastIndex].stepIds.contains(stepId) else { 
+                print("⚠️ UI: Duplicate navigator act.fail detected, skipping: \(stepId)")
+                return 
+            }
+            
+            let step = ExecutionStep(
+                stepNumber: questions[lastIndex].currentStep,
+                timestamp: timestamp,
+                type: .navigation,
+                title: "❌ Navigator",
+                details: content.isEmpty ? "Action failed" : content,
+                status: .error
+            )
+            
+            questions[lastIndex].stepIds.insert(stepId)
+            addStepWithAnimation(step, to: lastIndex)
+            
+        default:
+            break
+        }
+    }
+    
+    private func handleValidatorMessage(_ message: [String: Any], state: String, lastIndex: Int, eventId: String) {
+        let content = message["content"] as? String ?? ""
+        let timestamp = Date()
+        
+        switch state {
+        case "step.start":
+            // Show progress for validator start
+            break
+        case "step.ok":
+            // Validator completed - show final result like extension
+            let stepId = "validator_ok_\(eventId)"
+            guard !questions[lastIndex].stepIds.contains(stepId) else { 
+                print("⚠️ UI: Duplicate validator step.ok detected, skipping: \(stepId)")
+                return 
+            }
+            
+            let step = ExecutionStep(
+                stepNumber: questions[lastIndex].currentStep,
+                timestamp: timestamp,
+                type: .validation,
+                title: "✅ Validator",
+                details: content,
+                status: .completed
+            )
+            
+            questions[lastIndex].stepIds.insert(stepId)
+            addStepWithAnimation(step, to: lastIndex)
+            
+            // Fallback: If validator completes and task is still executing, mark as complete
+            // This handles cases where the extension doesn't send the final system task.ok message
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                if questions[lastIndex].isExecuting {
+                    print("🔧 Fallback: Validator completed but task still executing, marking as complete")
+                    questions[lastIndex].isExecuting = false
+                    questions[lastIndex].taskEndTime = Date()
+                    self.stopTaskTimer()
+                    self.addCompletionMessage(lastIndex: lastIndex, success: true)
+                }
+            }
+            
+        default:
+            break
+        }
+    }
+    
+    private func addCompletionMessage(lastIndex: Int, success: Bool, error: String? = nil) {
+        let stepId = "completion_\(success)_\(Date().timeIntervalSince1970)"
+        guard !questions[lastIndex].stepIds.contains(stepId) else { return }
+        
+        let step = ExecutionStep(
+            stepNumber: questions[lastIndex].currentStep + 1,
+            timestamp: Date(),
+            type: success ? .completed : .error,
+            title: success ? "🎉 Task Completed" : "❌ Task Failed",
+            details: success ? "Task completed successfully!" : (error ?? "Task failed"),
+            status: success ? .completed : .error
+        )
+        
+        questions[lastIndex].stepIds.insert(stepId)
+        addStepWithAnimation(step, to: lastIndex)
+        questions[lastIndex].activeStepId = nil
     }
     
     private func handleTaskAnalysisUpdate(_ userInfo: [AnyHashable: Any]) {
@@ -859,29 +961,16 @@ struct AgentPanel: View {
             timestamp: Date(),
             type: .userInput,
             title: "❓ User Input Required",
-            details: "\(prompt)\n\nType: \(inputType)",
-            status: .running
+            details: prompt,
+            status: .running,
+            inputId: inputId,
+            inputType: inputType,
+            prompt: prompt
         )
         questions[lastIndex].executionSteps.append(step)
-        
-        // Show an alert or input dialog (simplified for now)
-        DispatchQueue.main.async {
-            let alert = NSAlert()
-            alert.messageText = "Input Required"
-            alert.informativeText = prompt
-            alert.addButton(withTitle: "Submit")
-            alert.addButton(withTitle: "Cancel")
-            
-            if let window = NSApplication.shared.windows.first {
-                alert.beginSheetModal(for: window) { response in
-                    if response == .alertFirstButtonReturn {
-                        // For now, send a default response
-                        connectionManager.sendUserInputResponse(inputId: inputId, value: "User confirmed")
-                    }
-                }
-            }
-        }
+        questions[lastIndex].activeStepId = step.id.uuidString
     }
+    
     
     private func formatStepDetails(_ details: [String: Any]) -> String {
         var result = ""
@@ -1406,8 +1495,13 @@ struct QuestionCard: View {
                     Text(step.details)
                         .font(.system(size: 7))
                         .foregroundColor(.secondary)
-                        .lineLimit(step.type == .thinking ? nil : 3) // No line limit for LLM thinking steps
+                        .lineLimit(step.type == .thinking || step.type == .planning ? nil : 3) // No line limit for LLM thinking and planning steps
                         .textSelection(.enabled)
+                }
+                
+                // Inline user input interface
+                if step.type == .userInput && step.status == .running {
+                    UserInputInterface(step: step)
                 }
                 
                 // Timestamp
@@ -1528,6 +1622,119 @@ struct AgentLogRow: View {
     }
 }
 
+struct UserInputInterface: View {
+    let step: ExecutionStep
+    @State private var inputText: String = ""
+    @FocusState private var isInputFocused: Bool
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            // Input prompt
+            Text(step.prompt ?? "Please provide input:")
+                .font(.system(size: 8, weight: .medium))
+                .foregroundColor(.primary)
+                .padding(.top, 4)
+            
+            // Input field and buttons
+            VStack(spacing: 6) {
+                // Text input field
+                HStack(spacing: 6) {
+                    TextField(getPlaceholder(for: step.inputType ?? "text"), text: $inputText)
+                        .textFieldStyle(RoundedBorderTextFieldStyle())
+                        .font(.system(size: 9))
+                        .focused($isInputFocused)
+                        .onSubmit {
+                            submitInput()
+                        }
+                    
+                    // Submit button
+                    Button(action: submitInput) {
+                        Image(systemName: "paperplane.fill")
+                            .font(.system(size: 8, weight: .medium))
+                            .foregroundColor(.white)
+                            .frame(width: 20, height: 20)
+                            .background(
+                                Circle()
+                                    .fill(inputText.isEmpty ? Color.gray : Color.blue)
+                            )
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    .disabled(inputText.isEmpty)
+                }
+                
+                // Action buttons
+                HStack(spacing: 4) {
+                    Button("Skip") {
+                        sendResponse("SKIP")
+                    }
+                    .buttonStyle(LinkButtonStyle())
+                    .font(.system(size: 7))
+                    
+                    Spacer()
+                    
+                    Button("Cancel") {
+                        sendResponse("CANCELLED")
+                    }
+                    .buttonStyle(LinkButtonStyle())
+                    .font(.system(size: 7))
+                    .foregroundColor(.red)
+                }
+            }
+            .padding(8)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(Color.blue.opacity(0.05))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(Color.blue.opacity(0.2), lineWidth: 1)
+                    )
+            )
+        }
+        .onAppear {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                isInputFocused = true
+            }
+        }
+    }
+    
+    private func submitInput() {
+        guard !inputText.isEmpty else { return }
+        sendResponse(inputText)
+    }
+    
+    private func sendResponse(_ value: String) {
+        guard let inputId = step.inputId else { return }
+        ExtensionConnectionManager.shared.sendUserInputResponse(inputId: inputId, value: value)
+    }
+    
+    private func getPlaceholder(for inputType: String) -> String {
+        switch inputType.lowercased() {
+        case "email":
+            return "Enter email address..."
+        case "password":
+            return "Enter password..."
+        case "number":
+            return "Enter number..."
+        case "url":
+            return "Enter URL..."
+        case "search":
+            return "Enter search term..."
+        case "tel", "phone":
+            return "Enter phone number..."
+        default:
+            return "Type your response..."
+        }
+    }
+}
+
+struct LinkButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundColor(.blue)
+            .opacity(configuration.isPressed ? 0.6 : 1.0)
+    }
+}
+
 extension DateFormatter {
     static let executionTimeFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -1572,6 +1779,28 @@ struct ExecutionStep: Identifiable {
     let title: String
     let details: String
     let status: StepStatus
+    
+    // User input specific properties
+    let inputId: String?
+    let inputType: String?
+    let prompt: String?
+    
+    init(stepNumber: Int, timestamp: Date, type: StepType, title: String, details: String, status: StepStatus, inputId: String? = nil, inputType: String? = nil, prompt: String? = nil) {
+        self.stepNumber = stepNumber
+        self.timestamp = timestamp
+        self.type = type
+        self.title = title
+        self.details = details
+        self.status = status
+        self.inputId = inputId
+        self.inputType = inputType
+        self.prompt = prompt
+    }
+    
+    // Convenience initializer for non-user-input steps
+    init(stepNumber: Int, timestamp: Date, type: StepType, title: String, details: String, status: StepStatus) {
+        self.init(stepNumber: stepNumber, timestamp: timestamp, type: type, title: title, details: details, status: status, inputId: nil, inputType: nil, prompt: nil)
+    }
     
     enum StepType {
         case planning, navigation, validation, completed, error, analysis, thinking, progress, userInput

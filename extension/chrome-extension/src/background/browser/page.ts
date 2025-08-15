@@ -633,6 +633,76 @@ export default class Page {
     }
   }
 
+  async scrollToElementWithPosition(elementNode: DOMElementNode, position: 'top' | 'center' | 'bottom' = 'center'): Promise<void> {
+    if (!this._puppeteerPage) {
+      throw new Error('Puppeteer is not connected');
+    }
+
+    const element = await this.locateElement(elementNode);
+    if (!element) {
+      throw new Error(`Element: ${elementNode} not found`);
+    }
+
+    // Smart scroll with human-like behavior
+    await element.evaluate((el, pos) => {
+      const rect = el.getBoundingClientRect();
+      const viewportHeight = window.visualViewport?.height || window.innerHeight;
+      
+      let targetY = rect.top + window.scrollY;
+      
+      // Adjust based on desired position
+      switch (pos) {
+        case 'top':
+          // Position element at top with small margin
+          targetY -= 50;
+          break;
+        case 'center':
+          // Position element in center of viewport
+          targetY -= viewportHeight / 2 - rect.height / 2;
+          break;
+        case 'bottom':
+          // Position element at bottom with small margin
+          targetY -= viewportHeight - rect.height - 50;
+          break;
+      }
+      
+      // Ensure we don't scroll beyond page boundaries
+      const maxScroll = document.documentElement.scrollHeight - viewportHeight;
+      targetY = Math.max(0, Math.min(targetY, maxScroll));
+      
+      // Smooth scroll to target position
+      window.scrollTo({
+        top: targetY,
+        left: window.scrollX,
+        behavior: 'smooth'
+      });
+    }, position);
+
+    // Wait for scroll to complete
+    await new Promise(resolve => setTimeout(resolve, 500));
+  }
+
+  async scrollSmallAmount(direction: 'up' | 'down', amount: number = 10): Promise<number> {
+    if (!this._puppeteerPage) {
+      throw new Error('Puppeteer is not connected');
+    }
+
+    return await this._puppeteerPage.evaluate((dir, amt) => {
+      const viewportHeight = window.visualViewport?.height || window.innerHeight;
+      const scrollDistance = Math.round(viewportHeight * (amt / 100));
+      const finalDistance = dir === 'up' ? -scrollDistance : scrollDistance;
+      
+      // Perform smooth scroll
+      window.scrollBy({
+        top: finalDistance,
+        left: 0,
+        behavior: 'smooth'
+      });
+      
+      return Math.abs(finalDistance);
+    }, direction, amount);
+  }
+
   async scrollBy(y: number, elementNode?: DOMElementNode): Promise<void> {
     if (!this._puppeteerPage) {
       throw new Error('Puppeteer is not connected');
@@ -1257,12 +1327,31 @@ export default class Page {
           rect.right <= (window.innerWidth || document.documentElement.clientWidth);
 
         if (!isInViewport) {
-          // Scroll into view if not visible
-          el.scrollIntoView({
-            behavior: 'auto',
-            block: 'center',
-            inline: 'center',
-          });
+          // Gentle scroll into view with human-like behavior
+          const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+          const elementCenter = rect.top + rect.height / 2;
+          const viewportCenter = viewportHeight / 2;
+          
+          // Only scroll if element is significantly out of view
+          if (rect.bottom < 0 || rect.top > viewportHeight) {
+            // Element is completely out of view - use smooth scrolling
+            el.scrollIntoView({
+              behavior: 'smooth',
+              block: 'center',
+              inline: 'nearest',
+            });
+          } else if (Math.abs(elementCenter - viewportCenter) > viewportHeight * 0.3) {
+            // Element is partially visible but not well positioned - gentle adjustment
+            const targetY = window.scrollY + (elementCenter - viewportCenter);
+            const maxScroll = document.documentElement.scrollHeight - viewportHeight;
+            const clampedY = Math.max(0, Math.min(targetY, maxScroll));
+            
+            window.scrollTo({
+              top: clampedY,
+              left: window.scrollX,
+              behavior: 'smooth'
+            });
+          }
           return false;
         }
 

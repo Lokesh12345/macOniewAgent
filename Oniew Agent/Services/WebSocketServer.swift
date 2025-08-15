@@ -9,6 +9,7 @@ class WebSocketServer {
     private let queue = DispatchQueue(label: "websocket.server")
     private var pingTimer: Timer?
     private var isServerRunning = false
+    private var processedMessages: Set<String> = []
     
     var onConnectionChanged: ((Bool) -> Void)?
     var onMessage: (([String: Any]) -> Void)?
@@ -108,6 +109,7 @@ class WebSocketServer {
         // Reset handshake state for new connection
         isWebSocketHandshakeComplete = false
         receivedData.removeAll()
+        processedMessages.removeAll()
         
         connection = newConnection
         print("🔗 New TCP connection from: \(newConnection.endpoint)")
@@ -231,6 +233,11 @@ class WebSocketServer {
         return hash.base64EncodedString()
     }
     
+    private func addToFrameBuffer(_ data: Data) {
+        // This method is no longer needed since we process frames directly
+        // in startReceiving() - removing to prevent duplicate processing
+    }
+    
     private func handleWebSocketFrame(_ data: Data) {
         // Parse WebSocket frame
         guard data.count >= 2 else { return }
@@ -292,24 +299,53 @@ class WebSocketServer {
     
     private func handleTextMessage(_ message: String) {
         print("📨 Received WebSocket message: \(message)")
+        
         do {
             if let data = message.data(using: .utf8),
                let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                
+                // Create a unique ID based on message type, timestamp, and key content
+                let messageType = json["type"] as? String ?? "unknown"
+                let timestamp = json["timestamp"] as? String ?? ""
+                
+                var messageId = "\(messageType)_\(timestamp)"
+                
+                // For executor events, add more specific identification
+                if messageType == "executor_event",
+                   let data = json["data"] as? [String: Any],
+                   let event = data["event"] as? [String: Any] {
+                    let actor = event["actor"] as? String ?? ""
+                    let state = event["state"] as? String ?? ""
+                    let eventTimestamp = event["timestamp"] as? Int ?? 0
+                    messageId = "\(messageType)_\(actor)_\(state)_\(eventTimestamp)"
+                }
+                
+                // Check if we've already processed this exact message
+                if processedMessages.contains(messageId) {
+                    print("🔄 Duplicate message detected, skipping: \(messageId)")
+                    return
+                }
+                
+                // Mark this message as processed
+                processedMessages.insert(messageId)
+                
+                // Clean up old message IDs (keep only last 100)
+                if processedMessages.count > 100 {
+                    let oldIds = Array(processedMessages.prefix(processedMessages.count - 100))
+                    oldIds.forEach { processedMessages.remove($0) }
+                }
+                
                 print("✅ Parsed JSON message: \(json)")
                 
                 // Handle settings synchronization messages
-                if let messageType = json["type"] as? String {
-                    switch messageType {
-                    case "settings_request":
-                        sendSettingsToExtension()
-                    case "general_settings_request":
-                        sendGeneralSettingsToExtension()
-                    case "firewall_settings_request":
-                        sendFirewallSettingsToExtension()
-                    default:
-                        onMessage?(json)
-                    }
-                } else {
+                switch messageType {
+                case "settings_request":
+                    sendSettingsToExtension()
+                case "general_settings_request":
+                    sendGeneralSettingsToExtension()
+                case "firewall_settings_request":
+                    sendFirewallSettingsToExtension()
+                default:
                     onMessage?(json)
                 }
             }
@@ -517,6 +553,7 @@ class WebSocketServer {
         // Reset state
         isWebSocketHandshakeComplete = false
         receivedData.removeAll()
+        processedMessages.removeAll()
         isServerRunning = false
         
         print("✅ WebSocket server stopped")

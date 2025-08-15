@@ -16,6 +16,9 @@ import {
   getDropdownOptionsActionSchema,
   closeTabActionSchema,
   waitActionSchema,
+  requestUserInputActionSchema,
+  scrollSmallActionSchema,
+  scrollToElementActionSchema,
   previousPageActionSchema,
   scrollToPercentActionSchema,
   nextPageActionSchema,
@@ -218,6 +221,111 @@ export class ActionBuilder {
     }, waitActionSchema);
     actions.push(wait);
 
+    const requestUserInput = new Action(async (input: z.infer<typeof requestUserInputActionSchema.schema>) => {
+      const prompt = input.prompt;
+      const inputType = input.inputType || 'text';
+      
+      this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_START, `Wait for user input`);
+      
+      try {
+        // Send user input request to Mac app through global sendToMacApp function
+        // First, send the request
+        const inputId = `user_input_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        
+        // Access the global sendToMacApp function from background script
+        // We'll use a Promise to wait for the response
+        const result = await new Promise<string>((resolve, reject) => {
+          // Store the resolver in a global map that can be accessed by the background script
+          if (typeof (globalThis as any).pendingUserInputs === 'undefined') {
+            (globalThis as any).pendingUserInputs = new Map();
+          }
+          (globalThis as any).pendingUserInputs.set(inputId, { resolve, reject });
+          
+          // Send message to Mac app via the global function
+          if (typeof (globalThis as any).sendToMacApp === 'function') {
+            (globalThis as any).sendToMacApp('user_input_needed', {
+              inputId,
+              prompt,
+              inputType
+            });
+          } else {
+            reject(new Error('Mac app connection not available'));
+            return;
+          }
+          
+          // Set timeout
+          setTimeout(() => {
+            if ((globalThis as any).pendingUserInputs?.has(inputId)) {
+              (globalThis as any).pendingUserInputs.delete(inputId);
+              reject(new Error('User input timeout'));
+            }
+          }, 300000); // 5 minutes
+        });
+        
+        const msg = `User provided: ${result}`;
+        this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_OK, msg);
+        return new ActionResult({ 
+          extractedContent: result, 
+          includeInMemory: true 
+        });
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : 'User input failed';
+        this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_FAIL, errorMsg);
+        return new ActionResult({ 
+          error: errorMsg, 
+          includeInMemory: true 
+        });
+      }
+    }, requestUserInputActionSchema);
+    actions.push(requestUserInput);
+
+    // Smart scroll small amounts
+    const scrollSmall = new Action(async (input: z.infer<typeof scrollSmallActionSchema.schema>) => {
+      const intent = input.intent || `Scroll ${input.direction} by ${input.amount}% of viewport`;
+      this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_START, intent);
+      
+      const page = await this.context.browserContext.getCurrentPage();
+      
+      // Use the new method for smooth incremental scrolling
+      const scrollAmount = await page.scrollSmallAmount(input.direction, input.amount);
+      
+      // Wait for scroll to complete
+      await new Promise(resolve => setTimeout(resolve, 300));
+      
+      const msg = `Scrolled ${input.direction} by ${scrollAmount}px (${input.amount}% of viewport)`;
+      this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_OK, msg);
+      return new ActionResult({ extractedContent: msg, includeInMemory: true });
+    }, scrollSmallActionSchema);
+    actions.push(scrollSmall);
+
+    // Smart scroll to element with positioning
+    const scrollToElement = new Action(async (input: z.infer<typeof scrollToElementActionSchema.schema>) => {
+      const intent = input.intent || `Scroll to element ${input.index} positioned at ${input.position}`;
+      this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_START, intent);
+      
+      const page = await this.context.browserContext.getCurrentPage();
+      const state = await page.getCachedState();
+      const elementNode = state?.selectorMap.get(input.index);
+      
+      if (!elementNode) {
+        const errorMsg = `Element with index ${input.index} does not exist - retry or use alternative actions`;
+        this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_FAIL, errorMsg);
+        return new ActionResult({ error: errorMsg, includeInMemory: true });
+      }
+
+      try {
+        await page.scrollToElementWithPosition(elementNode, input.position);
+        const msg = `Scrolled to element ${input.index} positioned at ${input.position}`;
+        this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_OK, msg);
+        return new ActionResult({ extractedContent: msg, includeInMemory: true });
+      } catch (error) {
+        const errorMsg = `Failed to scroll to element: ${error instanceof Error ? error.message : String(error)}`;
+        this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_FAIL, errorMsg);
+        return new ActionResult({ error: errorMsg, includeInMemory: true });
+      }
+    }, scrollToElementActionSchema);
+    actions.push(scrollToElement);
+
     // Element Interaction Actions
     const clickElement = new Action(
       async (input: z.infer<typeof clickElementActionSchema.schema>) => {
@@ -237,16 +345,17 @@ export class ActionBuilder {
           
           // Get the original task and current plan context
           const originalTasks = this.context.messageManager.getMessages()
-            .filter(m => m.content.includes('ultimate task'))
+            .filter(m => typeof m.content === 'string' && m.content.includes('ultimate task'))
             .map(m => {
-              const match = m.content.match(/ultimate task is: """([^"]+)"""/);
+              const content = m.content as string;
+              const match = content.match(/ultimate task is: """([^"]+)"""/);
               return match ? match[1] : null;
             })
             .filter(Boolean);
           
           const lastPlan = this.context.messageManager.getMessages()
-            .filter(m => m.content.includes('next_steps'))
-            .slice(-1)[0]?.content || '';
+            .filter(m => typeof m.content === 'string' && m.content.includes('next_steps'))
+            .slice(-1)[0]?.content as string || '';
           
           const recoveryMsg = `Element index ${input.index} no longer exists (DOM changed). ` +
             `ULTIMATE TASK: ${originalTasks[originalTasks.length - 1] || 'Unknown task'}. ` +
@@ -275,8 +384,48 @@ export class ActionBuilder {
 
         try {
           const initialTabIds = await this.context.browserContext.getAllTabIds();
+          
+          // 🚨 CRITICAL: Check if element is actually visible/in-view before clicking
+          const elementText = elementNode.getAllTextTillNextClickableElement(2);
+          console.log(`🎯 CLICK_ELEMENT: Attempting to click index ${input.index}: "${elementText}"`);
+          
+          // Check for common out-of-view indicators
+          if (!elementText || elementText.trim() === '' || elementText === 'undefined') {
+            const warningMsg = `🚨 ELEMENT ${input.index} APPEARS OUT OF VIEW (no visible text). ` +
+              `This often means the element is below the current viewport. ` +
+              `RECOMMENDED: Use scroll_small action with direction 'down' and amount 15-25% to find the element, then retry clicking.`;
+            
+            console.log(warningMsg);
+            this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_FAIL, warningMsg);
+            return new ActionResult({ 
+              error: warningMsg, 
+              includeInMemory: true,
+              success: false 
+            });
+          }
+          
+          // Store initial page state to detect if click actually worked
+          const initialUrl = page.url();
+          const initialScrollY = await page.getScrollInfo().then(([scrollY]) => scrollY);
+          
           await page.clickElementNode(this.context.options.useVision, elementNode);
-          let msg = `Clicked button with index ${input.index}: ${elementNode.getAllTextTillNextClickableElement(2)}`;
+          
+          // Wait a moment for any page changes to occur
+          await new Promise(resolve => setTimeout(resolve, 500));
+          
+          // Check if the click actually resulted in visible change
+          const newUrl = page.url();
+          const newScrollY = await page.getScrollInfo().then(([scrollY]) => scrollY);
+          const pageChanged = newUrl !== initialUrl || Math.abs(newScrollY - initialScrollY) > 50;
+          
+          let msg = `Clicked button with index ${input.index}: ${elementText}`;
+          
+          // Detect if element click didn't cause expected change (common with out-of-view elements)
+          if (!pageChanged && (elementText.includes('Next') || elementText.includes('Continue') || elementText.includes('Submit'))) {
+            msg += ` ⚠️ WARNING: No page change detected after clicking. Element may be out of view or inactive. Consider scrolling to locate the active element.`;
+            console.log(`🚨 SUSPICIOUS CLICK: ${msg}`);
+          }
+          
           logger.info(msg);
 
           // TODO: could be optimized by chrome extension tab api
@@ -326,16 +475,17 @@ export class ActionBuilder {
           
           // Get the original task and current plan context
           const originalTasks = this.context.messageManager.getMessages()
-            .filter(m => m.content.includes('ultimate task'))
+            .filter(m => typeof m.content === 'string' && m.content.includes('ultimate task'))
             .map(m => {
-              const match = m.content.match(/ultimate task is: """([^"]+)"""/);
+              const content = m.content as string;
+              const match = content.match(/ultimate task is: """([^"]+)"""/);
               return match ? match[1] : null;
             })
             .filter(Boolean);
           
           const lastPlan = this.context.messageManager.getMessages()
-            .filter(m => m.content.includes('next_steps'))
-            .slice(-1)[0]?.content || '';
+            .filter(m => typeof m.content === 'string' && m.content.includes('next_steps'))
+            .slice(-1)[0]?.content as string || '';
           
           const recoveryMsg = `Element index ${input.index} no longer exists (DOM changed). ` +
             `ULTIMATE TASK: ${originalTasks[originalTasks.length - 1] || 'Unknown task'}. ` +

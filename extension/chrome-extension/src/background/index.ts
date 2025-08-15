@@ -23,6 +23,140 @@ const browserContext = new BrowserContext({});
 let currentExecutor: Executor | null = null;
 let currentPort: chrome.runtime.Port | null = null;
 
+// WebSocket connection to Mac app
+let macAppSocket: WebSocket | null = null;
+const MAC_APP_WEBSOCKET_URL = 'ws://localhost:41899';
+
+// Gather browser context information
+async function gatherBrowserContext(activeTab: chrome.tabs.Tab): Promise<any> {
+  try {
+    // Browser information
+    const browserInfo = await chrome.runtime.getPlatformInfo();
+    const browserVersion = chrome.runtime.getManifest().version;
+    
+    // Active tab information
+    const tabInfo = {
+      url: activeTab.url || '',
+      title: activeTab.title || '',
+      favIconUrl: activeTab.favIconUrl || '',
+      windowId: activeTab.windowId,
+      index: activeTab.index,
+      pinned: activeTab.pinned || false,
+      audible: activeTab.audible || false,
+      discarded: activeTab.discarded || false,
+      autoDiscardable: activeTab.autoDiscardable !== false,
+      incognito: activeTab.incognito || false
+    };
+    
+    // Window information
+    let windowInfo = {};
+    if (activeTab.windowId) {
+      try {
+        const window = await chrome.windows.get(activeTab.windowId);
+        windowInfo = {
+          windowType: window.type,
+          windowState: window.state,
+          windowWidth: window.width,
+          windowHeight: window.height,
+          windowFocused: window.focused,
+          windowIncognito: window.incognito || false
+        };
+      } catch (e) {
+        console.warn('Could not get window info:', e);
+      }
+    }
+    
+    // Browser language and user agent from content script (if possible)
+    let browserLanguage = 'en';
+    let userAgent = '';
+    try {
+      const results = await chrome.tabs.executeScript(activeTab.id!, {
+        code: `({ 
+          language: navigator.language, 
+          userAgent: navigator.userAgent,
+          cookieEnabled: navigator.cookieEnabled,
+          onLine: navigator.onLine,
+          platform: navigator.platform,
+          screenWidth: screen.width,
+          screenHeight: screen.height,
+          colorDepth: screen.colorDepth,
+          pixelDepth: screen.pixelDepth,
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          viewport: {
+            width: window.innerWidth,
+            height: window.innerHeight
+          }
+        })`
+      });
+      
+      if (results && results[0]) {
+        const navInfo = results[0];
+        browserLanguage = navInfo.language;
+        userAgent = navInfo.userAgent;
+        
+        return {
+          // Browser Context
+          browser: {
+            name: 'Chrome',
+            version: browserVersion,
+            platform: browserInfo.os,
+            architecture: browserInfo.arch,
+            language: browserLanguage,
+            userAgent: userAgent,
+            cookieEnabled: navInfo.cookieEnabled,
+            onLine: navInfo.onLine,
+            navigatorPlatform: navInfo.platform
+          },
+          
+          // Screen and Display
+          screen: {
+            width: navInfo.screenWidth,
+            height: navInfo.screenHeight,
+            colorDepth: navInfo.colorDepth,
+            pixelDepth: navInfo.pixelDepth
+          },
+          
+          // Viewport
+          viewport: navInfo.viewport,
+          
+          // Tab Context
+          tab: tabInfo,
+          
+          // Window Context
+          window: windowInfo,
+          
+          // Detected timezone (may override system)
+          detectedTimezone: navInfo.timezone
+        };
+      }
+    } catch (e) {
+      console.warn('Could not execute script on tab:', e);
+    }
+    
+    // Fallback if script execution fails
+    return {
+      browser: {
+        name: 'Chrome',
+        version: browserVersion,
+        platform: browserInfo.os,
+        architecture: browserInfo.arch,
+        language: browserLanguage
+      },
+      tab: tabInfo,
+      window: windowInfo
+    };
+    
+  } catch (error) {
+    console.error('Error gathering browser context:', error);
+    return {
+      browser: {
+        name: 'Chrome',
+        error: 'Could not gather full browser context'
+      }
+    };
+  }
+}
+
 // Setup side panel behavior
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(error => console.error(error));
 
@@ -85,6 +219,199 @@ chrome.tabs.onRemoved.addListener(tabId => {
 
 logger.info('background loaded');
 
+// Connect to Mac app WebSocket server
+function connectToMacApp() {
+  try {
+    macAppSocket = new WebSocket(MAC_APP_WEBSOCKET_URL);
+    
+    macAppSocket.onopen = () => {
+      console.log('✅ Connected to Mac app WebSocket server');
+      // Send a ping to confirm connection
+      sendToMacApp('ping', {});
+    };
+    
+    macAppSocket.onmessage = (event) => {
+      try {
+        const message = JSON.parse(event.data);
+        console.log('🎯 Extension received message from Mac app:', message);
+        handleMacAppMessage(message);
+      } catch (error) {
+        console.error('❌ Error parsing Mac app message:', error);
+      }
+    };
+    
+    macAppSocket.onclose = () => {
+      console.log('🔌 Disconnected from Mac app WebSocket server, attempting reconnect...');
+      macAppSocket = null;
+      // Reconnect after 2 seconds
+      setTimeout(connectToMacApp, 2000);
+    };
+    
+    macAppSocket.onerror = (error) => {
+      console.error('❌ Mac app WebSocket error:', error);
+    };
+  } catch (error) {
+    console.error('❌ Failed to connect to Mac app:', error);
+    // Retry connection after 2 seconds
+    setTimeout(connectToMacApp, 2000);
+  }
+}
+
+// Send message to Mac app
+function sendToMacApp(type: string, data: any) {
+  if (macAppSocket && macAppSocket.readyState === WebSocket.OPEN) {
+    const message = {
+      type,
+      data,
+      timestamp: new Date().toISOString()
+    };
+    macAppSocket.send(JSON.stringify(message));
+    console.log('📤 Sent to Mac app:', message);
+  } else {
+    console.warn('⚠️ Mac app WebSocket not connected, cannot send:', type);
+  }
+}
+
+// Make sendToMacApp globally available for the action builder
+(globalThis as any).sendToMacApp = sendToMacApp;
+
+// Handle messages from Mac app
+async function handleMacAppMessage(message: any) {
+  const { type, data } = message;
+  
+  switch (type) {
+    case 'pong':
+      console.log('🏓 Received pong from Mac app');
+      break;
+      
+    case 'execute_task':
+      console.log('🚀 Mac app requested task execution:', data);
+      // Get current active tab - same as side panel does
+      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tabs.length === 0) {
+        throw new Error('No active tab found');
+      }
+      const tabId = tabs[0].id;
+      if (!tabId) {
+        throw new Error('Invalid tab ID');
+      }
+      
+      // Gather browser context and merge with Mac app context
+      const browserContext = await gatherBrowserContext(tabs[0]);
+      const combinedContext = {
+        ...data.context, // Mac app context
+        ...browserContext // Browser context (will override Mac app if same keys)
+      };
+      
+      console.log('🌐 Combined context:', combinedContext);
+      
+      // Create a mock message object that matches side panel format
+      const mockMessage = {
+        type: 'new_task',
+        task: data.task,
+        taskId: data.taskId,
+        tabId: tabId,
+        context: combinedContext
+      };
+      
+      // Use the exact same code path as side panel
+      await handleNewTaskMessage(mockMessage);
+      break;
+      
+    case 'abort_task':
+      console.log('🛑 Mac app requested task abort');
+      if (currentExecutor) {
+        await currentExecutor.cancel();
+      }
+      break;
+      
+    case 'user_input_response':
+      console.log('📨 Mac app sent user input response:', data);
+      
+      // Handle both executor-based and action-based user input
+      if (currentExecutor) {
+        // Pass the user input to the executor
+        await currentExecutor.handleUserInput(data.inputId, data.value);
+      }
+      
+      // Also handle global pending user inputs from actions
+      const globalPendingInputs = (globalThis as any).pendingUserInputs;
+      if (globalPendingInputs && globalPendingInputs.has(data.inputId)) {
+        const pending = globalPendingInputs.get(data.inputId);
+        globalPendingInputs.delete(data.inputId);
+        
+        if (data.value === 'CANCELLED' || data.value === 'DISMISSED') {
+          pending.reject(new Error('User cancelled input'));
+        } else if (data.value === 'SKIP') {
+          pending.resolve(''); // Empty string for skip
+        } else {
+          pending.resolve(data.value);
+        }
+      }
+      break;
+      
+    default:
+      console.log('⚠️ Unknown message type from Mac app:', type);
+  }
+}
+
+
+// Subscribe to executor events and send to ALL clients (Mac app + side panel)
+function subscribeToAllClients(executor: Executor) {
+  executor.clearExecutionEvents();
+  
+  executor.subscribeExecutionEvents(async (event) => {
+    console.log('📡 Broadcasting executor event to all clients:', event);
+    
+    // Send to Mac app via WebSocket
+    sendToMacApp('executor_event', { event });
+    
+    // Send to side panel via Chrome runtime port
+    if (currentPort) {
+      try {
+        currentPort.postMessage(event);
+      } catch (error) {
+        console.error('Failed to send to side panel:', error);
+      }
+    }
+    
+    // Cleanup if task is complete
+    if (['TASK_OK', 'TASK_FAIL', 'TASK_CANCEL'].includes(event.state)) {
+      await currentExecutor?.cleanup();
+    }
+  });
+}
+
+// Shared function to handle new task execution (used by both Mac app and side panel)
+async function handleNewTaskMessage(message: any) {
+  if (!message.task) {
+    console.error('❌ No task provided');
+    throw new Error('No task provided');
+  }
+  if (!message.tabId) {
+    console.error('❌ No tab ID provided');
+    throw new Error('No tab ID provided');
+  }
+
+  // ENSURE INITIALIZATION IS COMPLETE BEFORE RUNNING TASK
+  console.log('🔄 Ensuring initialization before running task...');
+  await ensureInitialized();
+  console.log('✅ Initialization confirmed, proceeding with task...');
+
+  logger.info('new_task', message.tabId, message.task);
+  currentExecutor = await setupExecutor(message.taskId, message.task, browserContext, message.context);
+  
+  // Subscribe to events and send to BOTH side panel AND Mac app
+  subscribeToAllClients(currentExecutor);
+
+  const result = await currentExecutor.execute();
+  logger.info('new_task execution result', message.tabId, result);
+  return result;
+}
+
+// Start WebSocket connection
+connectToMacApp();
+
 // Initialize defaults SYNCHRONOUSLY before any tasks can run
 let isInitialized = false;
 let initializationPromise: Promise<void> | null = null;
@@ -135,20 +462,12 @@ chrome.runtime.onConnect.addListener(port => {
             break;
 
           case 'new_task': {
-            if (!message.task) return port.postMessage({ type: 'error', error: 'No task provided' });
-            if (!message.tabId) return port.postMessage({ type: 'error', error: 'No tab ID provided' });
-
-            // ENSURE INITIALIZATION IS COMPLETE BEFORE RUNNING TASK
-            console.log('🔄 Ensuring initialization before running task...');
-            await ensureInitialized();
-            console.log('✅ Initialization confirmed, proceeding with task...');
-
-            logger.info('new_task', message.tabId, message.task);
-            currentExecutor = await setupExecutor(message.taskId, message.task, browserContext);
-            subscribeToExecutorEvents(currentExecutor);
-
-            const result = await currentExecutor.execute();
-            logger.info('new_task execution result', message.tabId, result);
+            try {
+              await handleNewTaskMessage(message);
+            } catch (error) {
+              const errorMessage = error instanceof Error ? error.message : String(error);
+              return port.postMessage({ type: 'error', error: errorMessage });
+            }
             break;
           }
           case 'follow_up_task': {
@@ -163,8 +482,8 @@ chrome.runtime.onConnect.addListener(port => {
             // If executor exists, add follow-up task
             if (currentExecutor) {
               currentExecutor.addFollowUpTask(message.task);
-              // Re-subscribe to events in case the previous subscription was cleaned up
-              subscribeToExecutorEvents(currentExecutor);
+              // Re-subscribe to events for ALL clients (Mac app + side panel)
+              subscribeToAllClients(currentExecutor);
               const result = await currentExecutor.execute();
               logger.info('follow_up_task execution result', message.tabId, result);
             } else {
@@ -278,8 +597,8 @@ chrome.runtime.onConnect.addListener(port => {
               // Switch to the specified tab
               await browserContext.switchTab(message.tabId);
               // Setup executor with the new taskId and a dummy task description
-              currentExecutor = await setupExecutor(message.taskId, message.task, browserContext);
-              subscribeToExecutorEvents(currentExecutor);
+              currentExecutor = await setupExecutor(message.taskId, message.task, browserContext, message.context);
+              subscribeToAllClients(currentExecutor);
 
               // Run replayHistory with the history session ID
               const result = await currentExecutor.replayHistory(message.historySessionId);
@@ -315,7 +634,7 @@ chrome.runtime.onConnect.addListener(port => {
   }
 });
 
-async function setupExecutor(taskId: string, task: string, browserContext: BrowserContext) {
+async function setupExecutor(taskId: string, task: string, browserContext: BrowserContext, context?: any) {
   const providers = await llmProviderStore.getAllProviders();
   // if no providers, need to display the options page
   if (Object.keys(providers).length === 0) {
@@ -385,6 +704,7 @@ async function setupExecutor(taskId: string, task: string, browserContext: Brows
       planningInterval: generalSettings.planningInterval,
     },
     generalSettings: generalSettings,
+    context: context,
   });
 
   return executor;

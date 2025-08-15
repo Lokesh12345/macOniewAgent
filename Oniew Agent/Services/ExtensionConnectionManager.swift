@@ -10,6 +10,7 @@ class ExtensionConnectionManager: ObservableObject {
     private var webSocketServer: WebSocketServer?
     private var messageHandlers: [String: (Any) -> Void] = [:]
     private let serverPort: UInt16 = 41899
+    private var processedMessageIds: Set<String> = []
     
     static let shared = ExtensionConnectionManager()
     
@@ -126,7 +127,28 @@ class ExtensionConnectionManager: ObservableObject {
     
     private func handleExtensionMessage(_ message: [String: Any]) {
         print("🎯 Mac app received message from extension: \(message)")
+        
+        // Create a unique ID for this message to prevent duplicate processing
+        let messageId = createMessageId(from: message)
+        
         DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            
+            // Check if we've already processed this exact message
+            if self.processedMessageIds.contains(messageId) {
+                print("⚠️ Duplicate message detected, skipping: \(messageId)")
+                return
+            }
+            
+            // Mark this message as processed
+            self.processedMessageIds.insert(messageId)
+            
+            // Clean up old message IDs (keep only last 100)
+            if self.processedMessageIds.count > 100 {
+                let oldIds = Array(self.processedMessageIds.prefix(self.processedMessageIds.count - 100))
+                oldIds.forEach { self.processedMessageIds.remove($0) }
+            }
+            
             guard let messageType = message["type"] as? String else { 
                 print("❌ No message type found in: \(message)")
                 return 
@@ -137,48 +159,48 @@ class ExtensionConnectionManager: ObservableObject {
             switch messageType {
             case "ping":
                 print("🏓 Received ping, sending pong")
-                self?.sendMessage(type: "pong", data: [:])
+                sendMessage(type: "pong", data: [:])
                 
             case "executor_event":
                 print("⚡ Received executor event")
                 if let data = message["data"] as? [String: Any],
                    let event = data["event"] as? [String: Any] {
-                    self?.handleExecutorEvent(event)
+                    handleExecutorEvent(event)
                 }
                 
             case "task_analysis":
                 print("📊 Received task analysis")
                 if let data = message["data"] as? [String: Any] {
-                    self?.handleTaskAnalysis(data)
+                    handleTaskAnalysis(data)
                 }
                 
             case "llm_thinking":
                 print("🧠 Received LLM thinking")
                 if let data = message["data"] as? [String: Any] {
-                    self?.handleLLMThinking(data)
+                    handleLLMThinking(data)
                 }
                 
             case "step_progress":
                 print("👣 Received step progress")
                 if let data = message["data"] as? [String: Any] {
-                    self?.handleStepProgress(data)
+                    handleStepProgress(data)
                 }
                 
             case "task_completion":
                 print("🎯 Received task completion")
                 if let data = message["data"] as? [String: Any] {
-                    self?.handleTaskCompletion(data)
+                    handleTaskCompletion(data)
                 }
                 
             case "user_input_needed":
                 print("❓ Received user input request")
                 if let data = message["data"] as? [String: Any] {
-                    self?.handleUserInputRequest(data)
+                    handleUserInputRequest(data)
                 }
                 
             default:
                 // Check for registered handlers
-                if let handler = self?.messageHandlers[messageType] {
+                if let handler = self.messageHandlers[messageType] {
                     print("🎪 Found handler for message type: \(messageType)")
                     handler(message["data"] ?? [:])
                 } else {
@@ -186,6 +208,35 @@ class ExtensionConnectionManager: ObservableObject {
                 }
             }
         }
+    }
+    
+    private func createMessageId(from message: [String: Any]) -> String {
+        // Create a unique ID based on message type, timestamp, and content
+        let type = message["type"] as? String ?? "unknown"
+        let timestamp = message["timestamp"] as? String ?? ""
+        
+        if let data = message["data"] as? [String: Any],
+           let event = data["event"] as? [String: Any] {
+            // For executor events, use actor, state, and task ID for better deduplication
+            let actor = event["actor"] as? String ?? ""
+            let state = event["state"] as? String ?? ""
+            let eventTimestamp = event["timestamp"] as? Int ?? 0
+            let eventData = event["data"] as? [String: Any] ?? [:]
+            let taskId = eventData["taskId"] as? String ?? ""
+            let step = eventData["step"] as? Int ?? 0
+            
+            // Create more specific ID that prevents duplicates but allows step progression
+            if !taskId.isEmpty {
+                // Use taskId, actor, state, and step for better deduplication
+                return "\(type)_\(taskId)_\(actor)_\(state)_\(step)_\(eventTimestamp)"
+            } else {
+                // Fallback for messages without taskId
+                let details = (eventData["details"] as? String ?? "").prefix(30)
+                return "\(type)_\(actor)_\(state)_\(eventTimestamp)_\(details.hashValue)"
+            }
+        }
+        
+        return "\(type)_\(timestamp)_\(message.debugDescription.hashValue)"
     }
     
     private func handleExecutorEvent(_ event: [String: Any]) {
@@ -324,7 +375,8 @@ class ExtensionConnectionManager: ObservableObject {
         
         var data: [String: Any] = [
             "task": task,
-            "taskId": taskId
+            "taskId": taskId,
+            "context": gatherSystemContext()
         ]
         
         // Only include tabId if it's explicitly provided and valid
@@ -389,6 +441,73 @@ class ExtensionConnectionManager: ObservableObject {
         } else {
             return "Server stopped"
         }
+    }
+    
+    private func gatherSystemContext() -> [String: Any] {
+        let now = Date()
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        let currentDate = formatter.string(from: now)
+        
+        let timeFormatter = DateFormatter()
+        timeFormatter.dateFormat = "HH:mm:ss"
+        let currentTime = timeFormatter.string(from: now)
+        
+        let isoFormatter = ISO8601DateFormatter()
+        let isoTimestamp = isoFormatter.string(from: now)
+        
+        // Get system locale information
+        let locale = Locale.current
+        let timezone = TimeZone.current
+        
+        // Get system language and region
+        let language = locale.language.languageCode?.identifier ?? "en"
+        let region = locale.region?.identifier ?? "US"
+        let currencyCode = locale.currency?.identifier ?? "USD"
+        let currencySymbol = locale.currencySymbol ?? "$"
+        
+        // Get more detailed location info
+        let countryName = locale.localizedString(forRegionCode: region) ?? region
+        
+        // System information
+        let systemVersion = ProcessInfo.processInfo.operatingSystemVersionString
+        let deviceName = Host.current().localizedName ?? "Mac"
+        
+        let context: [String: Any] = [
+            // Date and Time
+            "currentDate": currentDate,
+            "currentTime": currentTime,
+            "isoTimestamp": isoTimestamp,
+            "timezone": timezone.identifier,
+            "timezoneAbbreviation": timezone.abbreviation() ?? "",
+            "timezoneOffset": timezone.secondsFromGMT(),
+            
+            // Location and Locale
+            "language": language,
+            "region": region,
+            "locale": locale.identifier,
+            "country": region,
+            "countryName": countryName,
+            
+            // Currency
+            "currency": currencyCode,
+            "currencySymbol": currencySymbol,
+            
+            // System Information
+            "platform": "macOS",
+            "systemVersion": systemVersion,
+            "deviceName": deviceName,
+            
+            // Additional Context
+            "year": Calendar.current.component(.year, from: now),
+            "month": Calendar.current.component(.month, from: now),
+            "day": Calendar.current.component(.day, from: now),
+            "weekday": Calendar.current.component(.weekday, from: now),
+            "hour": Calendar.current.component(.hour, from: now)
+        ]
+        
+        print("🌍 System context gathered: \(context)")
+        return context
     }
     
     deinit {

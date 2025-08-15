@@ -213,3 +213,32 @@ export const waitActionSchema: ActionSchema = {
     seconds: z.number().int().default(3).describe('amount of seconds'),
   }),
 };
+
+export const requestUserInputActionSchema: ActionSchema = {
+  name: 'request_user_input',
+  description: 'Request input from the user when you need information that is not available on the page',
+  schema: z.object({
+    prompt: z.string().describe('Clear prompt asking the user for specific information'),
+    inputType: z.string().default('text').describe('Type of input: text, email, password, number, url, search, phone'),
+  }),
+};
+
+export const scrollSmallActionSchema: ActionSchema = {
+  name: 'scroll_small',
+  description: 'Scroll by a small amount (10% of viewport) in the specified direction. Use this for gentle, human-like scrolling to find elements that are slightly out of view.',
+  schema: z.object({
+    intent: z.string().default('').describe('purpose of this action'),
+    direction: z.enum(['up', 'down']).describe('direction to scroll - up or down'),
+    amount: z.number().int().min(5).max(50).default(10).describe('percentage of viewport to scroll (5-50%, default 10%)'),
+  }),
+};
+
+export const scrollToElementActionSchema: ActionSchema = {
+  name: 'scroll_to_element',
+  description: 'Smoothly scroll to bring a specific element into view with proper positioning. More precise than scroll_to_text.',
+  schema: z.object({
+    intent: z.string().default('').describe('purpose of this action'),
+    index: z.number().int().describe('index of the element to scroll to'),
+    position: z.enum(['top', 'center', 'bottom']).default('center').describe('where to position the element in viewport'),
+  }),
+};
