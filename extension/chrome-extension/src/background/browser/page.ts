@@ -334,6 +334,13 @@ export default class Page {
     return await this._puppeteerPage.content();
   }
 
+  async evaluate<T = unknown>(pageFunction: string | ((...args: any[]) => T), ...args: any[]): Promise<T> {
+    if (!this._puppeteerPage) {
+      throw new Error('Puppeteer page is not connected');
+    }
+    return await this._puppeteerPage.evaluate(pageFunction, ...args);
+  }
+
   getCachedState(): PageState | null {
     return this._cachedState;
   }

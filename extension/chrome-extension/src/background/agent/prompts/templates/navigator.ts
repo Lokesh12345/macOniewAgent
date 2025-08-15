@@ -119,33 +119,32 @@ Common action sequences:
 - Keep track of the status and subresults in the memory.
 - You are provided with procedural memory summaries that condense previous task history (every N steps). Use these summaries to maintain context about completed actions, current progress, and next steps. The summaries appear in chronological order and contain key information about navigation history, findings, errors encountered, and current state. Refer to these summaries to avoid repeating actions and to ensure consistent progress toward the task goal.
 
-9. 🚨 CRITICAL SCROLLING RULES - MANDATORY FOR ALL INTERACTIONS:
+9. 🔍 CONSERVATIVE SCROLLING GUIDELINES - USE ONLY WHEN NEEDED:
 
 🔴 **BEFORE EVERY CLICK: CHECK IF ELEMENT IS VISIBLE**
 - If you plan to click element index X, but don't see the element text/description, SCROLL FIRST
 - NEVER click an element index that appears empty or doesn't show clear text
 - Use scroll_small down 10-20% to find missing buttons/elements
 
-🔴 **QUIZ/TEST PLATFORMS - MANDATORY SCROLL STRATEGY:**
-- After answering each question: ALWAYS scroll down 15% before looking for Next/Continue button
-- If Next button click returns "success" but you're still on same question: SCROLL DOWN IMMEDIATELY
-- NEVER click the same element index 2+ times - scroll instead
-- Pattern: Answer → scroll_small down 15% → find Next button → click
+🔴 **QUIZ/TEST PLATFORMS - CONSERVATIVE SCROLL STRATEGY:**
+- ONLY scroll if you cannot find the Next/Continue button in current view
+- If Next button click returns "success" but you're still on same question: scroll down 10-15%
+- NEVER click the same element index 2+ times - scroll instead  
+- Pattern: Answer → Look for Next button → IF NOT VISIBLE, scroll_small down 15% → find Next button → click
 
 🔴 **REPETITIVE CLICKING DETECTION:**
 - If you click the same element index twice: STOP and scroll_small down 20%
 - If element returns "success" but page doesn't progress: SCROLL DOWN IMMEDIATELY  
 - If you can't find expected buttons (Next/Submit/Continue): scroll_small down 10-30%
 
-🔴 **SCROLLING ACTIONS - USE THESE FREQUENTLY:**
-- **scroll_small**: direction 'down'/'up', amount 10-30% - USE THIS CONSTANTLY for missing elements
+🔴 **SCROLLING ACTIONS - USE ONLY WHEN NEEDED:**
+- **scroll_small**: direction 'down'/'up', amount 10-20% - Use ONLY when elements are missing or not visible
 - **scroll_to_element**: Use when you know element index but need better positioning
 - **NEVER**: Use scroll_to_percent or scroll_to_bottom unless specifically needed
 
-🔴 **MANDATORY SCROLL SCENARIOS:**
-- Quiz platforms: After every question answer
-- Form filling: When buttons are missing
-- Any time element index shows no text/description
+🔴 **SCROLL ONLY IN THESE SCENARIOS:**
+- When buttons/elements are NOT visible in current view
+- When element index shows no text/description
 - When clicking same element twice with no progress
 - Before declaring any task impossible
 
@@ -155,7 +154,7 @@ Common action sequences:
 - Missing Next/Continue/Submit buttons = scroll_small down 10-30% until found
 - Empty element index (no text shown) = scroll_small to find the real element
 
-**REMEMBER: SCROLL FIRST, CLICK SECOND. When in doubt, scroll down 15%.**
+**REMEMBER: ONLY SCROLL WHEN ELEMENTS ARE NOT VISIBLE. Look carefully before scrolling.**
 
 10. Extraction:
 

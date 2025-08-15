@@ -23,6 +23,9 @@ import { URLNotAllowedError } from '../browser/views';
 import { chatHistoryStore } from '@extension/storage/lib/chat';
 import type { AgentStepHistory } from './history';
 import type { GeneralSettingsConfig } from '@extension/storage';
+import { TaskRewriter } from './task-rewriter';
+import { GoalTracker } from './goal-tracker';
+import { SystemMessage } from '@langchain/core/messages';
 
 const logger = createLogger('Executor');
 
@@ -46,6 +49,10 @@ export class Executor {
   private readonly generalSettings: GeneralSettingsConfig | undefined;
   private tasks: string[] = [];
   private pendingUserInputs: Map<string, { resolve: (value: string) => void; reject: (reason?: any) => void }> = new Map();
+  
+  // 🎯 Task rewriting and goal tracking
+  private readonly taskRewriter: TaskRewriter;
+  private readonly goalTracker: GoalTracker;
   
   // 🚨 Pattern detection for stuck clicking
   private lastClickedElements: Array<{elementIndex: number, step: number, result: string}> = [];
@@ -71,6 +78,11 @@ export class Executor {
     );
 
     this.generalSettings = extraArgs?.generalSettings;
+    
+    // 🎯 Initialize task rewriting and goal tracking
+    this.taskRewriter = new TaskRewriter(plannerLLM);
+    this.goalTracker = new GoalTracker(taskId);
+    
     this.tasks.push(task);
     this.navigatorPrompt = new NavigatorPrompt(context.options.maxActionsPerStep);
     this.plannerPrompt = new PlannerPrompt(extraArgs?.context);
@@ -128,7 +140,33 @@ export class Executor {
    * @returns {Promise<void>}
    */
   async execute(): Promise<void> {
-    logger.info(`🚀 Executing task: ${this.tasks[this.tasks.length - 1]}`);
+    const originalTask = this.tasks[this.tasks.length - 1];
+    logger.info(`🚀 Executing task: ${originalTask}`);
+    
+    // 🎯 TASK REWRITING: Transform ambiguous task into structured goal
+    try {
+      const currentPage = await this.context.browserContext.getCurrentPage();
+      const currentUrl = currentPage?.url();
+      const currentTitle = await currentPage?.title();
+      
+      const rewrittenTask = await this.taskRewriter.rewriteTask(originalTask, currentUrl, currentTitle);
+      
+      console.log('🎯 TASK REWRITER: Original task:', originalTask);
+      console.log('🎯 TASK REWRITER: Rewritten task:', rewrittenTask.rewrittenTask);
+      console.log('🎯 TASK REWRITER: Goal type:', rewrittenTask.goalType);
+      console.log('🎯 TASK REWRITER: Completion criteria:', rewrittenTask.completionCriteria);
+      
+      // Initialize goal tracking
+      this.goalTracker.initializeGoal(rewrittenTask);
+      
+      // Update the task in our tasks array
+      this.tasks[this.tasks.length - 1] = rewrittenTask.rewrittenTask;
+      
+    } catch (error) {
+      console.log('🎯 TASK REWRITER: Failed, using original task:', error);
+      // Continue with original task if rewriting fails
+    }
+    
     // reset the step counter
     const context = this.context;
     context.nSteps = 0;
@@ -210,6 +248,13 @@ export class Executor {
         if (!done) {
           done = await this.navigate();
         }
+        
+        // 🎯 GOAL TRACKING: Check if goal is complete after navigation
+        if (!done && this.goalTracker.isGoalComplete()) {
+          console.log('🎯 GOAL COMPLETED! Stopping execution.');
+          console.log('🎯 FINAL STATUS:', this.goalTracker.getProgressSummary());
+          done = true;
+        }
 
         // validate the output
         if (done && this.context.options.validateOutput && !this.context.stopped && !this.context.paused) {
@@ -266,62 +311,157 @@ export class Executor {
   private detectStuckClickingPattern(): void {
     const context = this.context;
     
-    // Track recent click actions from action results
-    const recentClickActions = context.actionResults
-      .slice(-5) // Look at last 5 actions
-      .filter(result => result.extractedContent?.includes('Clicked button with index'))
-      .map(result => {
-        const match = result.extractedContent?.match(/Clicked button with index (\d+)/);
-        return match ? {
-          elementIndex: parseInt(match[1]),
-          step: context.nSteps,
-          result: result.extractedContent || ''
-        } : null;
+    console.log(`🔍 PATTERN CHECK: Step ${context.nSteps}, Total action results: ${context.actionResults.length}`);
+    
+    // Track ALL recent actions from action results - Comprehensive memory tracking
+    const recentActions = context.actionResults
+      .slice(-8) // Look at last 8 actions (increased for better pattern detection)
+      .map((result, index) => {
+        const content = result.extractedContent || '';
+        
+        // Classify action type and extract relevant data
+        let actionType = 'unknown';
+        let elementIndex: number | null = null;
+        let actionDetails = '';
+        
+        if (content.includes('Clicked button with index') || content.includes('CLICK COMPLETED')) {
+          actionType = 'click';
+          // Updated patterns to match actual log formats
+          const match = content.match(/(?:Clicked button with index|CLICK COMPLETED.*index)\s*(\d+)/);
+          elementIndex = match ? parseInt(match[1]) : null;
+          // Extract button text after the index
+          const textMatch = content.match(/index\s*\d+:\s*([^⚠️]+?)(?:\s*⚠️|$)/);
+          actionDetails = textMatch ? textMatch[1].trim() : content;
+        } else if (content.includes('Scrolled') || content.includes('scroll_small') || content.includes('SCROLL')) {
+          actionType = 'scroll';
+          actionDetails = content;
+        } else if (content.includes('Typed')) {
+          actionType = 'input';
+          actionDetails = content;
+        } else if (content.includes('Navigated')) {
+          actionType = 'navigation';
+          actionDetails = content;
+        } else {
+          actionType = content.split(' ')[0]?.toLowerCase() || 'unknown';
+          actionDetails = content;
+        }
+        
+        return {
+          actionType,
+          elementIndex,
+          actionDetails,
+          step: context.nSteps - (context.actionResults.length - index - 1),
+          fullResult: content,
+          hasError: !!result.error
+        };
       })
-      .filter(Boolean) as Array<{elementIndex: number, step: number, result: string}>;
+      .filter(action => action.actionType !== 'unknown');
 
-    if (recentClickActions.length < 2) return;
+    // Separate click actions for specific click pattern detection  
+    const recentClickActions = recentActions.filter(action => action.actionType === 'click');
 
-    // Check for same element clicked multiple times
-    const elementCounts = new Map<number, number>();
-    for (const action of recentClickActions) {
-      elementCounts.set(action.elementIndex, (elementCounts.get(action.elementIndex) || 0) + 1);
+    // Comprehensive action memory logging
+    console.log(`🔍 COMPREHENSIVE ACTION MEMORY (last 8 actions):`);
+    recentActions.forEach((action, i) => {
+      const errorFlag = action.hasError ? ' ❌' : ' ✅';
+      console.log(`  ${i+1}. ${action.actionType.toUpperCase()}: ${action.actionDetails}${errorFlag}`);
+    });
+    
+    console.log(`🔍 CLICK ACTIONS FOUND: ${recentClickActions.length} clicks:`, 
+      recentClickActions.map(a => `Element ${a.elementIndex} (${a.actionDetails.substring(0, 20)}...)`));
+
+    // Enhanced pattern detection with all action types
+    if (recentActions.length < 3) {
+      console.log(`🔍 INSUFFICIENT ACTION HISTORY: Need at least 3 actions, found ${recentActions.length}`);
+      return;
     }
 
-    // Find elements clicked 2+ times
+    // 1. CHECK FOR REPEATED CLICKS (original logic)
+    const elementCounts = new Map<number, number>();
+    for (const action of recentClickActions) {
+      if (action.elementIndex !== null) {
+        elementCounts.set(action.elementIndex, (elementCounts.get(action.elementIndex) || 0) + 1);
+      }
+    }
+
     const repeatedElements = Array.from(elementCounts.entries()).filter(([_, count]) => count >= 2);
     
-    if (repeatedElements.length > 0) {
+    // 2. CHECK FOR STUCK PATTERNS WITH COMPREHENSIVE ACTION ANALYSIS
+    const lastFourActions = recentActions.slice(-4);
+    const actionTypePattern = lastFourActions.map(a => a.actionType).join(' → ');
+    
+    // Detect common stuck patterns
+    const stuckPatterns = {
+      repeatedClicks: repeatedElements.length > 0,
+      clickScrollLoop: actionTypePattern.includes('click → scroll → click') || actionTypePattern.includes('scroll → click → scroll'),
+      noSuccessfulActions: lastFourActions.filter(a => !a.hasError).length < 2,
+      sameElementRepeated: repeatedElements.length > 0
+    };
+    
+    console.log(`🔍 STUCK PATTERN ANALYSIS:`, stuckPatterns);
+    console.log(`🔍 ACTION PATTERN: ${actionTypePattern}`);
+    
+    // 3. TRIGGER INTERVENTION IF PATTERNS DETECTED
+    let shouldIntervene = false;
+    let interventionReason = '';
+    
+    if (stuckPatterns.repeatedClicks) {
       const [repeatedIndex, clickCount] = repeatedElements[0];
-      
-      // Check if these are Next/Continue/Submit buttons (common stuck pattern)
       const hasNavigationButtons = recentClickActions.some(action => 
         action.elementIndex === repeatedIndex && 
-        (action.result.includes('Next') || action.result.includes('Continue') || action.result.includes('Submit'))
+        (action.fullResult.includes('Next') || action.fullResult.includes('Continue') || action.fullResult.includes('Submit'))
       );
 
       if (hasNavigationButtons) {
-        const forceScrollMsg = `🚨 STUCK PATTERN DETECTED: Element ${repeatedIndex} clicked ${clickCount} times (appears to be Next/Continue button). ` +
-          `FORCING SCROLL: scroll_small down 20% to find the active element. This overrides the current planned action.`;
-        
-        console.log(forceScrollMsg);
-        logger.info(forceScrollMsg);
-        
-        // Force add a scroll action to the context
-        const scrollAction = {
-          scroll_small: {
-            intent: 'FORCED - Break stuck clicking pattern',
-            direction: 'down' as const,
-            amount: 20
-          }
-        };
-
-        // Add the forced scroll as high-priority message
-        context.messageManager.addSystemMessage(`${forceScrollMsg}\n\nFORCED ACTION REQUIRED: ${JSON.stringify(scrollAction)}\n\nExecute this scroll action immediately before any other planned actions.`);
-
-        // Mark for re-planning to incorporate the forced scroll
-        context.needsReplanning = true;
+        shouldIntervene = true;
+        interventionReason = `Element ${repeatedIndex} clicked ${clickCount} times (Next/Continue button)`;
       }
+    }
+    
+    if (stuckPatterns.clickScrollLoop && !shouldIntervene) {
+      shouldIntervene = true;
+      interventionReason = `Click-scroll loop detected: ${actionTypePattern}`;
+    }
+    
+    if (stuckPatterns.noSuccessfulActions && context.nSteps >= 3 && !shouldIntervene) {
+      shouldIntervene = true;
+      interventionReason = `Too many failed actions in sequence (less than 2 successful in last 4)`;
+    }
+
+    // 4. APPLY INTERVENTION IF NEEDED
+    if (shouldIntervene) {
+      const forceScrollMsg = `🚨 STUCK PATTERN DETECTED: ${interventionReason}. ` +
+        `Action history: ${actionTypePattern}. ` +
+        `FORCING SCROLL: scroll_small down 25% to break pattern and find active elements.`;
+      
+      console.log(forceScrollMsg);
+      logger.info(forceScrollMsg);
+      
+      // Force add a scroll action to the context
+      const scrollAction = {
+        scroll_small: {
+          intent: 'FORCED - Break stuck pattern using comprehensive action analysis',
+          direction: 'down' as const,
+          amount: 25
+        }
+      };
+
+      // Add the forced scroll as high-priority message with action context
+      const contextualMessage = `${forceScrollMsg}\n\n` +
+        `RECENT ACTION MEMORY:\n${recentActions.map((a, i) => `${i+1}. ${a.actionType}: ${a.actionDetails}`).join('\n')}\n\n` +
+        `FORCED ACTION REQUIRED: ${JSON.stringify(scrollAction)}\n\n` +
+        `Execute this scroll action immediately to break the detected stuck pattern.`;
+        
+      // Create a system message for the forced scroll
+      const systemMessage = new SystemMessage(contextualMessage);
+      context.messageManager.addMessageWithTokens(systemMessage, 'forced_scroll');
+
+      // Mark for re-planning to incorporate the forced scroll
+      context.needsReplanning = true;
+      
+      console.log(`🚨 INTERVENTION APPLIED: Added scroll action with full action context`);
+    } else {
+      console.log(`✅ NO STUCK PATTERNS DETECTED: Action flow appears normal`);
     }
   }
 
@@ -342,6 +482,9 @@ export class Executor {
       if (context.paused || context.stopped) {
         return false;
       }
+      
+      // 🎯 GOAL TRACKING: Analyze recent actions for goal progress
+      this.trackGoalProgress(context.actionResults);
       
       // Check if any action results indicate DOM changes (like autocomplete)
       if (context.actionResults && context.actionResults.length > 0) {
@@ -559,7 +702,72 @@ export class Executor {
       
       logger.info(`User input received for ${inputId}: ${value}`);
     } else {
-      logger.warn(`No pending user input found for ID: ${inputId}`);
+      logger.error(`No pending user input found for ID: ${inputId}`);
+    }
+  }
+
+  /**
+   * 🎯 Track goal progress based on recent actions
+   */
+  private trackGoalProgress(actionResults: ActionResult[]): void {
+    if (!actionResults || actionResults.length === 0) return;
+
+    const goalState = this.goalTracker.getGoalState();
+    if (!goalState) return;
+
+    // Analyze recent actions for goal-relevant progress
+    const recentActions = actionResults.slice(-5); // Look at last 5 actions
+    
+    for (const action of recentActions) {
+      const content = action.extractedContent || '';
+      
+      // Track quiz progress
+      if (goalState.task.goalType === 'quiz') {
+        // Detect successful Next button clicks (indicating question progression)
+        if (content.includes('Next ❯') && 
+            (content.includes('SUCCESS') || content.includes('Changes detected'))) {
+          
+          console.log('🎯 QUIZ PROGRESS: Detected successful Next button click');
+          this.goalTracker.recordQuestionAnswered('Question progression detected');
+          console.log('🎯 CURRENT STATUS:', this.goalTracker.getProgressSummary());
+        }
+        
+        // Detect answer selections
+        if (content.includes('Clicked') && 
+            !content.includes('Next') && 
+            !content.includes('<script>') &&
+            (content.includes('SUCCESS') || content.includes('Changes detected'))) {
+          
+          console.log('🎯 QUIZ PROGRESS: Detected answer selection');
+          this.goalTracker.recordAction(`Answer selected: ${content.substring(0, 100)}...`);
+        }
+      }
+      
+      // Track form progress
+      if (goalState.task.goalType === 'form') {
+        if (content.includes('submit') || content.includes('Submit')) {
+          console.log('🎯 FORM PROGRESS: Detected form submission');
+          this.goalTracker.recordFormCompleted('Form submission detected');
+        }
+        
+        if (content.includes('Typed') || content.includes('input')) {
+          console.log('🎯 FORM PROGRESS: Detected input field completion');
+          this.goalTracker.recordAction(`Input completed: ${content.substring(0, 100)}...`);
+        }
+      }
+      
+      // Track page navigation for all goal types
+      if (content.includes('Navigated to') || content.includes('navigateTo')) {
+        const urlMatch = content.match(/https?:\/\/[^\s]+/);
+        if (urlMatch) {
+          this.goalTracker.recordPageVisit(urlMatch[0]);
+        }
+      }
+    }
+    
+    // Log progress periodically
+    if (recentActions.length > 0) {
+      console.log('🎯 GOAL PROGRESS UPDATE:', this.goalTracker.getDetailedProgress());
     }
   }
 }

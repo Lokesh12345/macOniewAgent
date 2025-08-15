@@ -30,6 +30,7 @@ import { createLogger } from '@src/background/log';
 import { ExecutionState, Actors } from '../event/types';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { wrapUntrustedContent } from '../messages/utils';
+import { DynamicChangeDetector, type DOMSnapshot } from '../intelligence/dynamic-change-detector';
 
 const logger = createLogger('Action');
 
@@ -145,10 +146,28 @@ export function buildDynamicActionSchema(actions: Action[]): z.ZodType {
 export class ActionBuilder {
   private readonly context: AgentContext;
   private readonly extractorLLM: BaseChatModel;
+  private dynamicDetector: DynamicChangeDetector | null = null;
 
   constructor(context: AgentContext, extractorLLM: BaseChatModel) {
     this.context = context;
     this.extractorLLM = extractorLLM;
+  }
+
+  /**
+   * Initialize dynamic change detector when page is ready
+   */
+  private async ensureDynamicDetector(): Promise<DynamicChangeDetector> {
+    if (!this.dynamicDetector) {
+      try {
+        const page = await this.context.browserContext.getCurrentPage();
+        this.dynamicDetector = new DynamicChangeDetector(page, this.extractorLLM);
+        console.log('🧠 DYNAMIC: Intelligent change detector initialized');
+      } catch (error) {
+        console.log('🧠 DYNAMIC: Failed to initialize detector:', error);
+        throw error;
+      }
+    }
+    return this.dynamicDetector;
   }
 
   buildDefaultActions() {
@@ -390,40 +409,118 @@ export class ActionBuilder {
           console.log(`🎯 CLICK_ELEMENT: Attempting to click index ${input.index}: "${elementText}"`);
           
           // Check for common out-of-view indicators
+          // NOTE: Radio buttons and checkboxes often have empty text - the label is separate
+          // Only warn, don't block the click
           if (!elementText || elementText.trim() === '' || elementText === 'undefined') {
-            const warningMsg = `🚨 ELEMENT ${input.index} APPEARS OUT OF VIEW (no visible text). ` +
-              `This often means the element is below the current viewport. ` +
-              `RECOMMENDED: Use scroll_small action with direction 'down' and amount 15-25% to find the element, then retry clicking.`;
-            
-            console.log(warningMsg);
-            this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_FAIL, warningMsg);
-            return new ActionResult({ 
-              error: warningMsg, 
-              includeInMemory: true,
-              success: false 
-            });
+            console.log(`⚠️ WARNING: Element ${input.index} has no visible text (might be radio/checkbox or truly out of view)`);
+            // Don't block - let it try to click anyway
           }
           
-          // Store initial page state to detect if click actually worked
-          const initialUrl = page.url();
-          const initialScrollY = await page.getScrollInfo().then(([scrollY]) => scrollY);
+          // 🧠 DYNAMIC: Use AI-powered change detection instead of hardcoded patterns
+          let beforeSnapshot: DOMSnapshot | null = null;
+          let dynamicDetector: DynamicChangeDetector | null = null;
+          
+          try {
+            dynamicDetector = await this.ensureDynamicDetector();
+            beforeSnapshot = await dynamicDetector.takeSnapshot();
+            console.log('🧠 DYNAMIC: Captured before-action snapshot');
+          } catch (error) {
+            console.log('🧠 DYNAMIC: Failed to take before snapshot, falling back to basic detection:', error);
+          }
           
           await page.clickElementNode(this.context.options.useVision, elementNode);
           
-          // Wait a moment for any page changes to occur
-          await new Promise(resolve => setTimeout(resolve, 500));
+          // Wait for dynamic page updates
+          await new Promise(resolve => setTimeout(resolve, 800));
           
-          // Check if the click actually resulted in visible change
-          const newUrl = page.url();
-          const newScrollY = await page.getScrollInfo().then(([scrollY]) => scrollY);
-          const pageChanged = newUrl !== initialUrl || Math.abs(newScrollY - initialScrollY) > 50;
+          // 🧠 DYNAMIC: Use AI-powered change analysis
+          let changeAnalysis: any = null;
+          let pageChanged = false;
+          let changeDetails = 'Dynamic analysis not available';
+          
+          if (beforeSnapshot && dynamicDetector) {
+            try {
+              const afterSnapshot = await dynamicDetector.takeSnapshot();
+              console.log('🧠 DYNAMIC: Captured after-action snapshot');
+              
+              changeAnalysis = await dynamicDetector.analyzeChanges(
+                beforeSnapshot,
+                afterSnapshot,
+                {
+                  elementText,
+                  actionType: 'click_element',
+                  userIntent: `Click on "${elementText}" button/element`
+                }
+              );
+              
+              pageChanged = changeAnalysis.isSuccessfulInteraction;
+              changeDetails = `AI Analysis: ${changeAnalysis.changeDescription} (${changeAnalysis.changeConfidence}% confidence, Type: ${changeAnalysis.changeType})`;
+              
+              console.log('🧠 DYNAMIC: AI Analysis Result:', {
+                hasChanged: changeAnalysis.hasChanged,
+                confidence: changeAnalysis.changeConfidence,
+                changeType: changeAnalysis.changeType,
+                isSuccessful: changeAnalysis.isSuccessfulInteraction,
+                reasoning: changeAnalysis.reasoning
+              });
+              
+              // Show learning stats
+              const learningStats = dynamicDetector.getLearningStats();
+              console.log('🧠 LEARNING STATS:', learningStats);
+              
+            } catch (error) {
+              console.log('🧠 DYNAMIC: AI analysis failed, using fallback:', error);
+              // Fallback to basic detection
+              const newUrl = page.url();
+              const newScrollY = await page.getScrollInfo().then(([scrollY]) => scrollY);
+              const newPageHeight = await page.getScrollInfo().then(([, , scrollHeight]) => scrollHeight);
+              
+              pageChanged = newUrl !== page.url() || Math.abs(newScrollY - 0) > 50 || Math.abs(newPageHeight - 1000) > 20;
+              changeDetails = 'Fallback: Basic URL/scroll detection';
+            }
+          } else {
+            console.log('🧠 DYNAMIC: Snapshots not available, using basic detection');
+            // Basic fallback detection
+            const newUrl = page.url();
+            pageChanged = newUrl !== page.url(); // Very basic check
+            changeDetails = 'Basic: No dynamic analysis available';
+          }
           
           let msg = `Clicked button with index ${input.index}: ${elementText}`;
           
-          // Detect if element click didn't cause expected change (common with out-of-view elements)
-          if (!pageChanged && (elementText.includes('Next') || elementText.includes('Continue') || elementText.includes('Submit'))) {
-            msg += ` ⚠️ WARNING: No page change detected after clicking. Element may be out of view or inactive. Consider scrolling to locate the active element.`;
-            console.log(`🚨 SUSPICIOUS CLICK: ${msg}`);
+          // 🧠 DYNAMIC: AI-powered validation and logging
+          if (changeAnalysis) {
+            // Use AI analysis for validation
+            if (changeAnalysis.isSuccessfulInteraction) {
+              msg += ` ✅ AI SUCCESS: ${changeAnalysis.changeDescription} (${changeAnalysis.changeType}, ${changeAnalysis.changeConfidence}% confidence)`;
+              console.log(`🧠 SUCCESSFUL AI INTERACTION: ${msg}`);
+              console.log(`🧠 AI REASONING: ${changeAnalysis.reasoning}`);
+            } else if (changeAnalysis.hasChanged) {
+              msg += ` ⚠️ AI PARTIAL: Changes detected but success unclear (${changeAnalysis.changeConfidence}% confidence)`;
+              console.log(`🧠 PARTIAL AI INTERACTION: ${msg}`);
+              console.log(`🧠 AI REASONING: ${changeAnalysis.reasoning}`);
+            } else {
+              // Only warn for navigation buttons if AI is confident no changes occurred
+              if ((elementText.includes('Next') || elementText.includes('Continue') || elementText.includes('Submit')) && changeAnalysis.changeConfidence > 70) {
+                msg += ` ⚠️ AI WARNING: Navigation button may not have worked (${changeAnalysis.changeConfidence}% confidence no changes)`;
+                console.log(`🧠 SUSPICIOUS AI INTERACTION: ${msg}`);
+              } else {
+                msg += ` ℹ️ AI INFO: No significant changes detected (may be normal for this element)`;
+                console.log(`🧠 NEUTRAL AI INTERACTION: ${msg}`);
+              }
+              console.log(`🧠 AI REASONING: ${changeAnalysis.reasoning}`);
+            }
+            console.log(`🧠 DYNAMIC DETAILS: ${changeDetails}`);
+          } else {
+            // Fallback to simple logging
+            if (pageChanged) {
+              msg += ` ✅ SUCCESS: Changes detected`;
+              console.log(`✅ SUCCESSFUL CLICK: ${msg}`);
+            } else {
+              msg += ` ⚠️ WARNING: No changes detected`;
+              console.log(`⚠️ CLICK COMPLETED: ${msg}`);
+            }
+            console.log(`📊 FALLBACK DETAILS: ${changeDetails}`);
           }
           
           logger.info(msg);
